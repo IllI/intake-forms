@@ -1,0 +1,134 @@
+:root {
+    --primary: #d4af37;
+    --primary-light: #f1e5ac;
+    --primary-dark: #b8860b;
+    --text: #2c3e50;
+    --text-muted: #7f8c8d;
+    --bg-gradient: linear-gradient(135deg, #fdfcfb 0%, #e2d1c3 100%);
+    --card-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: rgba(255, 255, 255, 0.5);
+    --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Outfit', sans-serif; color: var(--text); background: var(--bg-gradient); min-height: 100vh; }
+[v-cloak] { display: none; }
+
+.background-blobs { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; overflow: hidden; opacity: 0.5; }
+.blob { position: absolute; width: 600px; height: 600px; border-radius: 50%; filter: blur(80px); }
+.blob1 { top: -200px; left: -200px; background: radial-gradient(circle, var(--primary-light) 0%, transparent 70%); }
+.blob2 { bottom: -200px; right: -200px; background: radial-gradient(circle, #e2d1c3 0%, transparent 70%); }
+
+.container { max-width: 950px; margin: 0 auto; padding: 2rem 1rem; }
+.header { text-align: center; margin-bottom: 2rem; }
+.practice-logo { max-height: 80px; margin-bottom: 0.5rem; }
+.practice-info { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+h1 { font-size: 2rem; color: var(--primary-dark); font-weight: 600; }
+
+.wizard-progress { display: flex; justify-content: center; gap: 1rem; margin-bottom: 2rem; }
+.step-indicator { width: 2.2rem; height: 2.2rem; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-weight: 600; border: 2px solid var(--glass-border); transition: 0.3s; }
+.step-indicator.active { background: var(--primary); color: white; border-color: var(--primary); transform: scale(1.1); }
+.step-indicator.completed { background: #4cd137; color: white; border-color: #4cd137; }
+
+.card.glass { background: var(--card-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 2rem; box-shadow: var(--shadow); }
+
+.section-title { font-size: 1.4rem; margin: 1.5rem 0 1rem; border-left: 4px solid var(--primary); padding-left: 1rem; }
+.subsection-title { font-size: 1.1rem; margin: 1.5rem 0 0.8rem; color: var(--primary-dark); font-weight: 600; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+.input-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.input-group.full-width { grid-column: 1 / span 2; }
+label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+input, select, textarea { padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid #ddd; font-family: inherit; font-size: 1rem; background: white; }
+input:focus, textarea:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(212,175,55,0.1); }
+
+.date-picker-dob, .date-picker {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v5h-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 20px;
+    padding-right: 40px !important;
+    cursor: pointer;
+}
+
+.mt-1 { margin-top: 1rem; }
+.mt-2 { margin-top: 2rem; }
+
+/* Checkbox Grid for Conditions */
+.checkbox-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
+.condition-checkbox { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; }
+.condition-checkbox input { width: auto; height: auto; }
+
+.tag-checkbox { display: flex; align-items: center; gap: 0.5rem; background: #f0f0f0; padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+.tag-checkbox input { display: none; }
+.tag-checkbox:has(input:checked) { background: var(--primary); color: white; }
+
+/* Legal text scroll box */
+.legal-scroll-box { font-size: 0.9rem; padding: 1.5rem; border-radius: 12px; margin-bottom: 1rem; line-height: 1.6; border: 1px solid #eee; background: #fff; box-shadow: 0 4px 15px rgba(0,0,0,0.02); }
+
+/* Consent Form Styling */
+.form-main-title { text-align: center; font-size: 1.2rem; text-decoration: underline; margin-bottom: 1rem; }
+.patient-header-info { display: flex; justify-content: space-between; padding: 0.5rem; background: #f9f9f9; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+.instruction-text { font-style: italic; font-size: 0.85rem; margin-bottom: 1.5rem; text-align: center; }
+
+.consent-block { margin-bottom: 1.5rem; }
+.block-title { font-weight: 700; font-size: 1rem; color: #333; }
+.block-body { padding-left: 2.2rem; margin-top: 0.5rem; font-size: 0.9rem; line-height: 1.5; color: #444; }
+
+.inline-checkbox-group { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 1rem 0; }
+.detail-line { display: flex; gap: 1.5rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+.detail-line span { display: flex; align-items: center; gap: 0.5rem; }
+.detail-line input, .detail-line select { padding: 0.4rem; height: auto; }
+
+.checkbox-container { display: flex; align-items: center; cursor: pointer; position: relative; padding-left: 2rem; font-size: 0.9rem; }
+.checkbox-container input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
+.checkmark { position: absolute; top: 0; left: 0; height: 1.2rem; width: 1.2rem; background-color: #eee; border: 1px solid #ccc; border-radius: 4px; }
+.checkbox-container:hover input ~ .checkmark { background-color: #ddd; }
+.checkbox-container input:checked ~ .checkmark { background-color: var(--primary); border-color: var(--primary); }
+.checkmark:after { content: ""; position: absolute; display: none; }
+.checkbox-container input:checked ~ .checkmark:after { display: block; }
+.checkbox-container .checkmark:after { left: 6px; top: 2px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+.initials-row { margin-top: 0.5rem; text-align: right; }
+.initial-input { width: 50px !important; text-align: center; border: none; border-bottom: 1px solid #333; font-weight: bold; border-radius: 0; font-family: 'Outfit'; }
+
+/* Signature Section */
+.signature-layout { display: grid; grid-template-columns: 1fr 250px; gap: 2rem; margin-top: 1rem; }
+.canvas-container { border: 1px solid #ddd; background: white; border-radius: 12px; height: 200px; }
+canvas { width: 100%; height: 100%; display: block; }
+
+.actions { display: flex; justify-content: space-between; margin-top: 2rem; }
+button { padding: 0.8rem 1.8rem; border-radius: 25px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; }
+.btn-next, .btn-submit { background: var(--primary); color: white; }
+.btn-prev { background: #eee; color: #555; }
+.btn-secondary { font-size: 0.8rem; margin-top: 0.5rem; background: transparent; color: var(--text-muted); text-decoration: underline; }
+
+/* PDF Overrides */
+.generating-pdf .no-print { display: none !important; }
+.generating-pdf .card.glass { background: white; box-shadow: none; border: none; padding: 0; }
+.generating-pdf .container { max-width: 8.5in; }
+.generating-pdf .fade-in { animation: none; transform: none; opacity: 1; }
+
+/* Success Overlay */
+.overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.overlay-content { text-align: center; max-width: 400px; }
+.checkmark-animation { font-size: 4rem; color: #4cd137; margin-bottom: 1rem; }
+
+/* CSS Spinner */
+.loader { border: 3px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top: 3px solid white; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; vertical-align: bottom; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* iPad Pill Checkboxes UX */
+.category-header { font-size: 1.1rem; color: var(--primary-dark); margin: 0 0 1rem; padding-bottom: 0.4rem; border-bottom: 2px solid #f1e5ac; }
+.condition-group-card { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #eee; box-shadow: 0 4px 15px rgba(0,0,0,0.02); }
+.pill-checkbox { display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 12px; padding: 0.8rem 0.5rem; transition: all 0.2s ease; box-sizing: border-box; }
+.pill-checkbox input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
+.pill-checkbox:hover { border-color: var(--primary-light); background: white; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+.pill-checkbox span { flex: 1; text-align: center; font-weight: 500; color: #555; font-size: 0.88rem; line-height: 1.2; user-select: none; }
+.pill-checkbox.selected { border-color: var(--primary); background: rgba(212, 175, 55, 0.08); box-shadow: inset 0 0 0 1px var(--primary); }
+.pill-checkbox.selected span { color: var(--primary-dark); font-weight: 700; }
+
+@media (max-width: 768px) {
+    .checkbox-grid { grid-template-columns: repeat(2, 1fr); }
+    .form-grid, .signature-layout { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Form Configuration</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .admin-container { max-width: 600px; margin: 3rem auto; padding: 2rem; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .step-block { display: flex; justify-content: space-between; align-items: center; padding: 1rem; margin: 0.5rem 0; background: #f9f9f9; border: 1px solid #eee; border-radius: 8px; cursor: move; }
+        .step-block:hover { border-color: #d4af37; }
+        .controls button { background: #eee; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; margin-left: 0.5rem; font-family: 'Outfit'; }
+        .controls button:hover { background: #ddd; }
+        .actions { margin-top: 2rem; text-align: right; }
+        .hidden-steps { margin-top: 3rem; border-top: 2px dashed #ccc; padding-top: 1rem; }
+        .hidden-steps .step-block { opacity: 0.5; }
+    </style>
+</head>
+<body>
+
+<div id="admin-app" class="admin-container">
+    <h2>Form Order Configuration</h2>
+    <p style="color:#777;">Drag to reorder active steps, or hide them if not needed.</p>
+
+    <div class="active-steps">
+        <h3>Active Form Steps</h3>
+        <div v-for="(step, index) in activeSteps" :key="step.id" class="step-block">
+            <div>
+                <strong>{{ index + 1 }}. {{ step.title }}</strong>
+                <p style="font-size: 0.8rem; margin:0; color: #666;">{{ step.subtitle }}</p>
+            </div>
+            <div class="controls">
+                <button @click="moveUp(index)" :disabled="index === 0">↑</button>
+                <button @click="moveDown(index)" :disabled="index === activeSteps.length - 1">↓</button>
+                <button @click="hideStep(index)">Hide</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="hidden-steps" v-if="hiddenSteps.length > 0">
+        <h3>Hidden Steps</h3>
+        <div v-for="(step, index) in hiddenSteps" :key="step.id" class="step-block">
+            <div>
+                <strong>{{ step.title }}</strong>
+            </div>
+            <div class="controls">
+                <button @click="restoreStep(index)">Restore</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="btn-submit" @click="saveConfig" style="background:#d4af37; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer;">Save Configuration to Kiosk</button>
+        <p v-if="savedMessage" style="color: green; margin-top: 1rem; font-weight: 600;">{{ savedMessage }}</p>
+    </div>
+</div>
+
+<script>
+const { createApp, ref } = Vue;
+
+createApp({
+    setup() {
+        const defaultPool = [
+            { id: 'registration', title: "Registration", subtitle: "Patient Details" },
+            { id: 'history', title: "History", subtitle: "Medical History" },
+            { id: 'conditions', title: "Conditions", subtitle: "Health Checklist" },
+            { id: 'smile', title: "Smile", subtitle: "Cosmetic Questionnaire" },
+            { id: 'cancellation', title: "Cancellation", subtitle: "Policy Agreement" },
+            { id: 'hipaa', title: "HIPAA", subtitle: "Privacy Practices" },
+            { id: 'consent', title: "Consent", subtitle: "Treatment Agreement" },
+            { id: 'signature', title: "Sign", subtitle: "Finalize" }
+        ];
+
+        const savedConfig = localStorage.getItem('SYG_FORM_CONFIG');
+        const initialActive = savedConfig ? JSON.parse(savedConfig) : defaultPool;
+        
+        const activeSteps = ref(initialActive);
+        const hiddenSteps = ref(defaultPool.filter(ds => !initialActive.find(a => a.id === ds.id)));
+        const savedMessage = ref('');
+
+        const moveUp = (idx) => {
+            if (idx > 0) {
+                const temp = activeSteps.value[idx];
+                activeSteps.value[idx] = activeSteps.value[idx - 1];
+                activeSteps.value[idx - 1] = temp;
+            }
+        };
+
+        const moveDown = (idx) => {
+            if (idx < activeSteps.value.length - 1) {
+                const temp = activeSteps.value[idx];
+                activeSteps.value[idx] = activeSteps.value[idx + 1];
+                activeSteps.value[idx + 1] = temp;
+            }
+        };
+
+        const hideStep = (idx) => {
+            const step = activeSteps.value.splice(idx, 1)[0];
+            hiddenSteps.value.push(step);
+        };
+
+        const restoreStep = (idx) => {
+            const step = hiddenSteps.value.splice(idx, 1)[0];
+            activeSteps.value.push(step);
+        };
+
+        const saveConfig = () => {
+            localStorage.setItem('SYG_FORM_CONFIG', JSON.stringify(activeSteps.value));
+            savedMessage.value = "Configuration saved! Form will now use this active order.";
+            setTimeout(() => savedMessage.value = '', 3000);
+        };
+
+        return { activeSteps, hiddenSteps, moveUp, moveDown, hideStep, restoreStep, saveConfig, savedMessage };
+    }
+}).mount('#admin-app');
+</script>
+
+</body>
+</html>
