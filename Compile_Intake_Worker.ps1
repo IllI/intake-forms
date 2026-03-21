@@ -9,7 +9,6 @@ using System;
 using System.IO;
 using Patterson.Services.PatientService;
 using Patterson.Services.DocumentService;
-using Patterson.EagleSoft.Library.Dtos;
 
 namespace EaglesoftIntake
 {
@@ -43,10 +42,11 @@ namespace EaglesoftIntake
                 try {
                     Console.WriteLine("[IntakeWorker] Registering PDF into SmartDocs for patient " + patientId + "...");
                     var docSvc = new DocumentService();
-                    var doc = new DocumentDto();
-                    doc.PatientId = patientId;
-                    doc.Description = "Intake Form";
-                    doc.DateCreated = DateTime.Now;
+                    var doc = new Document();
+                    doc.RefId = patientId;
+                    doc.RefTable = "patient";
+                    doc.DocumentName = "Intake Form";
+                    doc.Timestamp = DateTime.Now;
                     
                     docSvc.CreateDocumentFromFile(doc, pdfPath);
                     Console.WriteLine("[IntakeWorker] PDF attached. SmartDoc return data: " + doc.DocumentId);
@@ -127,7 +127,6 @@ $ptcBase = "D:\EagleSoft\Shared Files\Patterson.PTCBaseObjects.SharedObjects.dll
 $ptcSvc = "D:\EagleSoft\Shared Files\Patterson.Services.PatientService.dll"
 $ptcDocSvc = "D:\EagleSoft\Shared Files\Patterson.Services.DocumentService.dll"
 $ptcContracts = "D:\EagleSoft\Shared Files\Patterson.Services.ServiceContracts.dll"
-$ptcLibrary = "D:\EagleSoft\Shared Files\Patterson.EagleSoft.Library.dll"
 
 Write-Host "Compiling FULL native C# Worker Payload..."
 $compileArgs = @(
@@ -137,7 +136,6 @@ $compileArgs = @(
     "/r:`"$ptcSvc`"",
     "/r:`"$ptcDocSvc`"",
     "/r:`"$ptcContracts`"",
-    "/r:`"$ptcLibrary`"",
     "`"$csPath`""
 )
 
