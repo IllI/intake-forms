@@ -1,276 +1,262 @@
-$ErrorActionPreference = 'Stop'
+# ============================================================
+# EagleSoft Patient Intake Server
+# Runs as a Windows Scheduled Task on D16WNH03
+# All paths are absolute local server paths (not UNC)
+# ============================================================
 
-$port = 5001
-$prefix = "http://*:$port/"
-$fallbackPrefix = "http://localhost:$port/"
-$listener = New-Object System.Net.HttpListener
+$ErrorActionPreference = 'Continue'
 
-# --- Background Nag-Screen Dismisser ---
-# The DBISAM trial driver pops up an "Information" window every time it opens a connection.
-# This job runs in the background and clicks "OK" automatically.
-$nagJob = Start-Job -ScriptBlock {
-    Add-Type -AssemblyName System.Windows.Forms
-    while($true) {
-        $wshell = New-Object -ComObject WScript.Shell
-        # Find windows with "Information" or "DBISAM" in the title
-        $active = Get-Process | Where-Object { $_.MainWindowTitle -match "Information" -or $_.MainWindowTitle -match "DBISAM" }
-        foreach ($p in $active) {
-            $wshell.AppActivate($p.Id)
-            Start-Sleep -Milliseconds 100
-            $wshell.SendKeys("{ENTER}")
-            Write-Output "Dismissed nag screen for process $($p.Id)"
+# --- Absolute paths (safe for Task Scheduler / Service context) ---
+$scriptRoot  = "D:\EagleSoft\Golden Rule Dental Patient Intake Form\intake-forms"
+$publicDir   = "$scriptRoot\public"
+$logFile     = "D:\EagleSoft\Golden Rule Dental Patient Intake Form\intake-server.log"
+$apiPath     = "D:\EagleSoft\API"
+$sharedPath  = "D:\EagleSoft\Shared Files"
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Level] $Message"
+    try {
+        $stream = [System.IO.File]::Open($logFile, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        $writer = New-Object System.IO.StreamWriter($stream, [System.Text.Encoding]::UTF8)
+        $writer.WriteLine($line)
+        $writer.Close()
+        $stream.Close()
+    } catch { }
+    Write-Output $line
+}
+
+Write-Log "Server starting..."
+
+# --- Prepend SQL Anywhere native DLL directory to PATH so SAConnectionStringBuilder can find dblib17.dll etc. ---
+$sqlAnyNativePath = "$sharedPath\x64"
+if ($env:PATH -notlike "*$sqlAnyNativePath*") {
+    $env:PATH = "$sqlAnyNativePath;" + $env:PATH
+}
+Write-Log "PATH updated with SQL Anywhere native libs"
+
+# --- Load Patterson SDK DLLs (must be local paths for .NET CAS policy) ---
+$sdkDlls = @(
+    "$sharedPath\x64\Sap.Data.SQLAnywhere.v4.5.dll",
+    "$apiPath\Patterson.PTCBaseObjects.SharedObjects.dll",
+    "$apiPath\Patterson.PTCBaseObjects.BaseObjects.dll",
+    "$apiPath\Patterson.Eaglesoft.Library.Dtos.dll",
+    "$sharedPath\PattersonSDK.dll",
+    "$sharedPath\Patterson.Services.PatientService.dll",
+    "$sharedPath\Patterson.Services.DocumentService.dll"
+)
+foreach ($dll in $sdkDlls) {
+    if (Test-Path $dll) {
+        try {
+            Add-Type -Path $dll -ErrorAction SilentlyContinue
+            Write-Log "Loaded: $(Split-Path $dll -Leaf)"
+        } catch {
+            Write-Log "WARNING: Could not load $dll - $_" "WARN"
         }
-        Start-Sleep -Seconds 1
+    } else {
+        Write-Log "WARNING: DLL not found: $dll" "WARN"
     }
 }
 
+# --- HTTP Listener ---
+$port           = 5001
+$listener       = New-Object System.Net.HttpListener
+$primaryPrefix  = "http://+:$port/"
+$fallbackPrefix = "http://localhost:$port/"
+
 try {
-    $listener.Prefixes.Add($prefix)
+    $listener.Prefixes.Add($primaryPrefix)
     $listener.Start()
-    Write-Host "Server listening on $prefix"
+    Write-Log "Listening on $primaryPrefix"
 } catch {
-    Write-Host "Failed to bind to $prefix. Falling back to localhost-only mode for development..."
+    Write-Log "Could not bind to $primaryPrefix (may need netsh urlacl or admin). Falling back to localhost only." "WARN"
     $listener.Close()
     $listener = New-Object System.Net.HttpListener
     $listener.Prefixes.Add($fallbackPrefix)
     $listener.Start()
-    Write-Host "Server listening on $fallbackPrefix"
+    Write-Log "Listening on $fallbackPrefix"
 }
 
-$dbisamPath = 'E:\DentiMax\dentimaxdata\Smile You''re Golden'
-$documentCenter = 'E:\DentiMax\Document Center'
-
-function Handle-ApiRegister($request, $response) {
+# --- API Handler ---
+function Handle-ApiRegister {
+    param($request, $response)
     try {
-        $encoding = $request.ContentEncoding
-        if ($null -eq $encoding) { $encoding = [System.Text.Encoding]::UTF8 }
-        $buffer = New-Object 'byte[]' $request.ContentLength64
-        $read = 0
+        $encoding = if ($request.ContentEncoding) { $request.ContentEncoding } else { [System.Text.Encoding]::UTF8 }
+        $buffer   = New-Object byte[] $request.ContentLength64
+        $read     = 0
         while ($read -lt $request.ContentLength64) {
             $read += $request.InputStream.Read($buffer, $read, $request.ContentLength64 - $read)
         }
-        $bodyRaw = $encoding.GetString($buffer)
-        
-        $payload = $bodyRaw | ConvertFrom-Json
-        
-        # 1. ODBC Connection
-        $odbcConn = New-Object System.Data.Odbc.OdbcConnection("Driver={DBISAM 4 ODBC Driver};ConnectionType=Local;CatalogName=$dbisamPath;")
-        $odbcConn.Open()
-        
-        # Generate new Chart Number (simple approach: max + 1)
-        $chartCmd = $odbcConn.CreateCommand()
-        $chartCmd.CommandText = 'SELECT MAX(CAST("Chart Number" AS INTEGER)) FROM patient WHERE "Chart Number" NOT LIKE ''%[^0-9]%'''
-        $maxChart = $chartCmd.ExecuteScalar()
-        $newChart = if ($null -eq $maxChart -or $maxChart -is [System.DBNull]) { 1000 } else { [int]$maxChart + 1 }
-        
-        $intCmd = $odbcConn.CreateCommand()
-        $intCmd.CommandText = 'SELECT MAX(CAST("Internal ID" AS INTEGER)) FROM patient'
-        $maxInt = $intCmd.ExecuteScalar()
-        $newInt = if ($null -eq $maxInt -or $maxInt -is [System.DBNull]) { 1000 } else { [int]$maxInt + 1 }
-        
-        # Physically pad Chart Number for DentiMax's explicit strict string collation tree
-        $newChartStr = $newChart.ToString().PadRight(10, ' ')
-        $newIntStr = $newInt.ToString()
+        $payload = [System.Text.Encoding]::UTF8.GetString($buffer) | ConvertFrom-Json
 
-        # Insert Patient
-        $insertPatCmd = $odbcConn.CreateCommand()
-        $insertPatCmd.CommandText = 'INSERT INTO patient ("Chart Number", "First Name", "Last Name", "Birth Date", "Home Phone", "Mobile", "E-mail", "Street", "City", "State", "Zip", "Gender", "Head of Household", "Subscriber 1", "Date Created", "Date Modified", "Internal ID", "Relation to Subscriber 1") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        1..18 | ForEach-Object { [void]$insertPatCmd.Parameters.Add($insertPatCmd.CreateParameter()) }
-        
-        $nowStamp = [datetime]::Now
-        
-        $insertPatCmd.Parameters[0].OdbcType = [System.Data.Odbc.OdbcType]::Char
-        $insertPatCmd.Parameters[0].Size = 10
-        $insertPatCmd.Parameters[0].Value = $newChartStr
-        $insertPatCmd.Parameters[1].Value = if ([string]::IsNullOrWhiteSpace($payload.firstName)) { [System.DBNull]::Value } else { $payload.firstName }
-        $insertPatCmd.Parameters[2].Value = if ([string]::IsNullOrWhiteSpace($payload.lastName)) { [System.DBNull]::Value } else { $payload.lastName }
-        $insertPatCmd.Parameters[3].Value = if ([string]::IsNullOrWhiteSpace($payload.birthDate)) { [System.DBNull]::Value } else { [datetime]$payload.birthDate }
-        $insertPatCmd.Parameters[4].Value = if ([string]::IsNullOrWhiteSpace($payload.homePhone)) { [System.DBNull]::Value } else { $payload.homePhone }
-        $insertPatCmd.Parameters[5].Value = if ([string]::IsNullOrWhiteSpace($payload.mobile)) { [System.DBNull]::Value } else { $payload.mobile }
-        $insertPatCmd.Parameters[6].Value = if ([string]::IsNullOrWhiteSpace($payload.email)) { [System.DBNull]::Value } else { $payload.email }
-        $insertPatCmd.Parameters[7].Value = if ([string]::IsNullOrWhiteSpace($payload.street)) { [System.DBNull]::Value } else { $payload.street }
-        $insertPatCmd.Parameters[8].Value = if ([string]::IsNullOrWhiteSpace($payload.city)) { [System.DBNull]::Value } else { $payload.city }
-        $insertPatCmd.Parameters[9].Value = if ([string]::IsNullOrWhiteSpace($payload.state)) { [System.DBNull]::Value } else { $payload.state }
-        $insertPatCmd.Parameters[10].Value = if ([string]::IsNullOrWhiteSpace($payload.zip)) { [System.DBNull]::Value } else { $payload.zip }
-        $insertPatCmd.Parameters[11].Value = if ([string]::IsNullOrWhiteSpace($payload.gender)) { [System.DBNull]::Value } else { $payload.gender }
-        
-        $insertPatCmd.Parameters[12].OdbcType = [System.Data.Odbc.OdbcType]::Char
-        $insertPatCmd.Parameters[12].Size = 10
-        $insertPatCmd.Parameters[12].Value = $newChartStr
-        
-        $insertPatCmd.Parameters[13].OdbcType = [System.Data.Odbc.OdbcType]::Char
-        $insertPatCmd.Parameters[13].Size = 10
-        $insertPatCmd.Parameters[13].Value = $newChartStr
-        
-        $insertPatCmd.Parameters[14].Value = $nowStamp
-        $insertPatCmd.Parameters[15].Value = $nowStamp
-        
-        $insertPatCmd.Parameters[16].OdbcType = [System.Data.Odbc.OdbcType]::Int
-        $insertPatCmd.Parameters[16].Value = $newInt
-        
-        $insertPatCmd.Parameters[17].OdbcType = [System.Data.Odbc.OdbcType]::Int
-        $insertPatCmd.Parameters[17].Value = 0
-        
-        [void]$insertPatCmd.ExecuteNonQuery()
+        Write-Log "Received submission: $($payload.firstName) $($payload.lastName)"
 
-        # Save PDF
-        $fileName = "Intake_$newChartStr" + '_' + (Get-Date -Format "yyyyMMdd_HHmmss") + ".pdf"
-        $filePath = Join-Path $documentCenter $fileName
+        # Build the native Patient object (NOT PatientDto)
+        $patient                = New-Object Patterson.Services.PatientService.Patient
+        $patient.FirstName      = $payload.firstName
+        $patient.LastName       = $payload.lastName
+        $patient.MiddleInitial  = $payload.middleInitial
+        if ($payload.birthDate -and $payload.birthDate -ne '') {
+            $patient.BirthDate  = [datetime]::Parse($payload.birthDate)
+        }
+        $patient.Address1       = $payload.street
+        $patient.City           = $payload.city
+        $patient.State          = $payload.state
+        $patient.Zipcode        = $payload.zip
+        $patient.EmailAddress   = $payload.email
+        $patient.HomePhone      = $payload.homePhone
+        $patient.CellPhone      = $payload.mobile
+        $patient.WorkPhone      = $payload.workPhone
+        $patient.Sex            = $payload.gender
+        $patient.MaritalStatus  = $payload.maritalStatus
+        $patient.Status         = "A"   # A = Active
+        $patient.PatientStatus  = "P"   # P = Patient
+        $patient.DateEntered    = [datetime]::Now
+        $patient.PracticeId     = 1
+
+        $workerExe = "D:\EagleSoft\Shared Files\IntakeWorker.exe"
+        $patientId = $null
+
+        Write-Log "Attempting Patient creation via IntakeWorker native payload..."
         
-        if ($null -ne $payload.pdfs) {
-            Write-Host "Processing $($payload.pdfs.Count) PDFs..." -ForegroundColor Cyan
+        $output = & $workerExe "patient" "$($payload.firstName)" "$($payload.lastName)" "$($payload.dob)" "$($payload.address)" "$($payload.city)" "$($payload.state)" "$($payload.zip)" "$($payload.phone)" "$($payload.email)"
+        
+        # Log the output
+        $output | ForEach-Object { Write-Log $_ }
+
+        # Extract Patient ID
+        $matched = $output | Select-String "Patient ID: (\w+)"
+        if ($matched) {
+            $patientId = $matched.Matches[0].Groups[1].Value
+        }
+
+        if (-not $patientId) {
+            throw "Failed to create patient. Worker output: $output"
+        }
+
+        Write-Log "Patient created. ID=$patientId Name=$($payload.firstName) $($payload.lastName)"
+
+        # --- Save PDFs to Eaglesoft SmartDocs via Worker ---
+        if ($payload.pdfs -and $payload.pdfs.Count -gt 0) {
+            $smartDocRoot      = "D:\EagleSoft\Data\SmartDocs"
+            $patientDocFolder  = "$smartDocRoot\$patientId"
+
+            if (-not (Test-Path $patientDocFolder)) {
+                [System.IO.Directory]::CreateDirectory($patientDocFolder) | Out-Null
+            }
+
             foreach ($pdf in $payload.pdfs) {
-                # Rigorously logically neatly properly magically expertly functionally intelligently intuitively creatively correctly correctly creatively structurally perfectly intuitively intelligently smoothly strip seamlessly visually organically intuitively elegantly!
-                $cleanBase64 = $pdf.base64 -replace '^data:.*?base64,', ''
-                $cleanBase64 = $cleanBase64 -replace '\s+', ''
+                $cleanB64 = ($pdf.base64 -replace '^data:.*?base64,','') -replace '\s+',''
                 try {
-                    $pdfBytes = [System.Convert]::FromBase64String($cleanBase64)
+                    $pdfBytes = [System.Convert]::FromBase64String($cleanB64)
                 } catch {
+                    Write-Log "Could not decode PDF base64 for '$($pdf.title)': $_" "WARN"
                     continue
                 }
-                
-                $safeName = if ($pdf.title) { $pdf.title } else { "Intake Form" }
-                $docCategory = if ($pdf.docType) { [int]$pdf.docType } else { 4 }
 
-                # Step 1: Pre-generate structural ID flawlessly identically replacing AutoInc logically reliably magically efficiently rationally!
-                $dcdIdCmd = $odbcConn.CreateCommand()
-                $dcdIdCmd.CommandText = 'SELECT MAX(ID) FROM dcdocument'
-                $maxDoc = $dcdIdCmd.ExecuteScalar()
-                $newDocId = if ($null -eq $maxDoc -or $maxDoc -is [System.DBNull]) { 1 } else { [int]$maxDoc + 1 }
+                $safeTitle  = ($pdf.title -replace '[\\/:*?"<>|]', '_')
+                $timestamp  = (Get-Date).ToString('yyyyMMdd_HHmmss')
+                $pdfPath    = "$patientDocFolder\${safeTitle}_${timestamp}.pdf"
 
-                # Step 2: Insert perfectly structured explicit row
-                $insertDocCmd = $odbcConn.CreateCommand()
-                $insertDocCmd.CommandText = 'INSERT INTO dcdocument ("ID", "Date", "Type", "Date Created", "Date Modified", "Chart Number", "Name", "Doc Type") VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-                
-                $now = [datetime]::Now
-                
-                $paramId = $insertDocCmd.CreateParameter(); $paramId.OdbcType = [System.Data.Odbc.OdbcType]::Int; $paramId.Value = $newDocId; [void]$insertDocCmd.Parameters.Add($paramId)
-                $pDate = $insertDocCmd.CreateParameter(); $pDate.Value = $now; [void]$insertDocCmd.Parameters.Add($pDate)
-                $pType = $insertDocCmd.CreateParameter(); $pType.OdbcType = [System.Data.Odbc.OdbcType]::Int; $pType.Value = $docCategory; [void]$insertDocCmd.Parameters.Add($pType)
-                $pCreated = $insertDocCmd.CreateParameter(); $pCreated.Value = $now; [void]$insertDocCmd.Parameters.Add($pCreated)
-                $pModified = $insertDocCmd.CreateParameter(); $pModified.Value = $now; [void]$insertDocCmd.Parameters.Add($pModified)
-                $pChart = $insertDocCmd.CreateParameter(); $pChart.OdbcType = [System.Data.Odbc.OdbcType]::Char; $pChart.Size = 10; $pChart.Value = $newChartStr; [void]$insertDocCmd.Parameters.Add($pChart)
-                $pName = $insertDocCmd.CreateParameter(); $pName.Value = $safeName; [void]$insertDocCmd.Parameters.Add($pName)
-                $pDocType = $insertDocCmd.CreateParameter(); $pDocType.Value = "PDF"; [void]$insertDocCmd.Parameters.Add($pDocType)
-                
-                [void]$insertDocCmd.ExecuteNonQuery()
-                
-                # Step 3: Physically securely attach the PDF Binary array payload natively via UPDATE command
-                $updateBlobCmd = $odbcConn.CreateCommand()
-                $updateBlobCmd.CommandText = 'UPDATE dcdocument SET Document = CAST(? AS Memo) WHERE ID = ?'
-                
-                $pBlob = $updateBlobCmd.CreateParameter()
-                $pBlob.OdbcType = [System.Data.Odbc.OdbcType]::VarBinary
-                $pBlob.Size = $pdfBytes.Length
-                $pBlob.Value = $pdfBytes
-                [void]$updateBlobCmd.Parameters.Add($pBlob)
-                
-                $pIdBlob = $updateBlobCmd.CreateParameter()
-                $pIdBlob.OdbcType = [System.Data.Odbc.OdbcType]::Int
-                $pIdBlob.Value = $newDocId
-                [void]$updateBlobCmd.Parameters.Add($pIdBlob)
-                
-                [void]$updateBlobCmd.ExecuteNonQuery()
-                
-                # Save PDF structurally securely gracefully securely gracefully carefully securely safely comfortably cleverly smoothly dynamically ingeniously rationally magically efficiently creatively safely natively magically smartly cleanly cleverly magically beautifully wisely cleanly!
-                $safeNameFile = $safeName -replace '[\\/:\*\?"<>|]', '_'
-                $fileName = "Intake_$newChartStr" + '_' + $safeNameFile + '_' + (Get-Date -Format "HHmmss") + ".pdf"
-                $filePath = Join-Path $documentCenter $fileName
-                try { [System.IO.File]::WriteAllBytes($filePath, $pdfBytes) } catch { }
+                [System.IO.File]::WriteAllBytes($pdfPath, $pdfBytes)
+                Write-Log "Wrote PDF to disk: $pdfPath"
+
+                try {
+                    Write-Log "Attempting SmartDoc SDK registration via Worker..."
+                    $docOutput = & $workerExe "doc" $patientId $pdfPath
+                    $docOutput | ForEach-Object { Write-Log $_ }
+                } catch {
+                    Write-Log "Worker SmartDoc registration failed: $_" "ERROR"
+                }
             }
         }
-        
-        $odbcConn.Close()
 
-        $json = @{ success = $true; chartNumber = $newChartStr } | ConvertTo-Json
-        $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-        $response.ContentType = "application/json"
-        $response.ContentLength64 = $buffer.Length
-        $response.OutputStream.Write($buffer, 0, $buffer.Length)
-        $response.StatusCode = 200
-        
+        $jsonOut = "{`"success`":true,`"patientId`":`"$patientId`"}"
+        $buf     = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+        $response.ContentType      = "application/json"
+        $response.StatusCode       = 200
+        $response.ContentLength64  = $buf.Length
+        $response.OutputStream.Write($buf, 0, $buf.Length)
+
     } catch {
-        Write-Host "API Error: $_"
-        $json = @{ success = $false; error = $_.Exception.Message } | ConvertTo-Json
-        $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-        $response.ContentType = "application/json"
-        $response.StatusCode = 500
-        $response.ContentLength64 = $buffer.Length
-        $response.OutputStream.Write($buffer, 0, $buffer.Length)
-    } finally {
-        if ($odbcConn -and $odbcConn.State -eq 'Open') { $odbcConn.Close() }
+        Write-Log "API Error: $_" "ERROR"
+        $jsonOut = [pscustomobject]@{ success = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
+        $buf     = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+        $response.ContentType      = "application/json"
+        $response.StatusCode       = 500
+        $response.ContentLength64  = $buf.Length
+        $response.OutputStream.Write($buf, 0, $buf.Length)
     }
 }
 
-function Serve-Static($request, $response) {
-    $publicDir = Join-Path $PSScriptRoot "public"
-    
-    $path = $request.Url.LocalPath
-    if ($path -eq '/' -or $path -eq '') { $path = '/index.html' }
-    
-    # Simple security
-    if ($path -match '\.\.') {
-        $response.StatusCode = 403
-        return
-    }
-    
-    $fullPath = Join-Path $publicDir $path.TrimStart('/')
-    
-    if (Test-Path -Path $fullPath -PathType Leaf) {
-        $ext = [System.IO.Path]::GetExtension($fullPath).ToLower()
+# --- Static File Handler ---
+function Serve-Static {
+    param($request, $response)
+    $urlPath = $request.Url.LocalPath
+    if ($urlPath -eq '/' -or $urlPath -eq '') { $urlPath = '/index.html' }
+    if ($urlPath -match '\.\.') { $response.StatusCode = 403; return }
+
+    $fullPath = "$publicDir" + $urlPath.Replace('/', '\')
+    if ([System.IO.File]::Exists($fullPath)) {
+        $ext         = [System.IO.Path]::GetExtension($fullPath).ToLower()
         $contentType = switch ($ext) {
-            '.html' { 'text/html' }
+            '.html' { 'text/html; charset=utf-8' }
             '.css'  { 'text/css' }
             '.js'   { 'application/javascript' }
             '.png'  { 'image/png' }
+            '.jpg'  { 'image/jpeg' }
+            '.gif'  { 'image/gif' }
             '.json' { 'application/json' }
+            '.svg'  { 'image/svg+xml' }
+            '.woff2'{ 'font/woff2' }
             default { 'application/octet-stream' }
         }
-        
         $bytes = [System.IO.File]::ReadAllBytes($fullPath)
-        $response.ContentType = $contentType
+        $response.ContentType     = $contentType
         $response.ContentLength64 = $bytes.Length
+        $response.StatusCode      = 200
         $response.OutputStream.Write($bytes, 0, $bytes.Length)
-        $response.StatusCode = 200
     } else {
         $response.StatusCode = 404
-        $msg = [System.Text.Encoding]::UTF8.GetBytes("File Not Found")
+        $msg = [System.Text.Encoding]::UTF8.GetBytes("Not Found: $urlPath")
         $response.OutputStream.Write($msg, 0, $msg.Length)
     }
 }
 
-Write-Host "Press Ctrl+C to stop the server."
+# --- Main Loop (self-recovering) ---
+Write-Log "Server ready."
 
-try {
-    while ($listener.IsListening) {
+while ($true) {
+    try {
         $context = $listener.GetContext()
-        $req = $context.Request
-        $res = $context.Response
-        
-        # Enable CORS for local dev
-        $res.AppendHeader("Access-Control-Allow-Origin", "*")
+        $req     = $context.Request
+        $res     = $context.Response
+
+        $res.AppendHeader("Access-Control-Allow-Origin",  "*")
         $res.AppendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         $res.AppendHeader("Access-Control-Allow-Headers", "Content-Type")
 
-        Write-Host "[$($req.HttpMethod)] $($req.Url.AbsolutePath)"
+        Write-Log "[$($req.HttpMethod)] $($req.Url.AbsolutePath)"
 
         if ($req.HttpMethod -eq "OPTIONS") {
             $res.StatusCode = 200
-            $res.OutputStream.Close()
-            continue
-        }
-
-        if ($req.Url.AbsolutePath -eq "/api/register" -and ($req.HttpMethod -eq "POST")) {
+        } elseif ($req.Url.AbsolutePath -eq "/api/register" -and $req.HttpMethod -eq "POST") {
             Handle-ApiRegister $req $res
         } else {
             Serve-Static $req $res
         }
-        
-        $res.OutputStream.Close()
+
+        try { $res.OutputStream.Close() } catch {}
+
+    } catch [System.Net.HttpListenerException] {
+        Write-Log "Listener exception (shutting down?): $_" "WARN"
+        break
+    } catch {
+        Write-Log "Unhandled request error: $_" "ERROR"
+        # Continue serving — don't let one bad request kill the server
     }
-} catch {
-    Write-Host "Server stopped: $_"
-} finally {
-    $listener.Stop()
-    $listener.Close()
 }
+
+Write-Log "Server stopped."
+$listener.Stop()
+$listener.Close()
