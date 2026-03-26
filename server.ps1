@@ -5,20 +5,6 @@ $prefix = "http://*:$port/"
 $fallbackPrefix = "http://localhost:$port/"
 $listener = New-Object System.Net.HttpListener
 
-# Load Win32 API for targeted window closing
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class Win32Helper {
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
-}
-"@
-
-
 try {
     $listener.Prefixes.Add($prefix)
     $listener.Start()
@@ -35,7 +21,78 @@ try {
 $dbisamPath = 'E:\DentiMax\dentimaxdata\Smile You''re Golden'
 $documentCenter = 'E:\DentiMax\Document Center'
 
-function Handle-ApiRegister($request, $response, $suppressorProcess) {
+function Start-NagSuppressorJob {
+    Start-Job -ScriptBlock {
+        param($LogFile)
+
+        function Write-Log($msg) {
+            $line = "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))] [NagSuppressorJob] $msg"
+            try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
+        }
+
+        Add-Type -AssemblyName System.Windows.Forms
+        $wshell = New-Object -ComObject WScript.Shell
+        $dismissed = 0
+        $handled = New-Object 'System.Collections.Generic.HashSet[string]'
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+        Write-Log "Started."
+
+        while ($dismissed -lt 2 -and $sw.Elapsed.TotalSeconds -lt 60) {
+            try {
+                $targets = Get-Process | Where-Object {
+                    $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -eq 'Information'
+                }
+
+                foreach ($target in $targets) {
+                    try {
+                        $handleKey = $target.MainWindowHandle.ToString()
+                        if ($handled.Contains($handleKey)) {
+                            continue
+                        }
+
+                        [void]$wshell.AppActivate($target.Id)
+                        Start-Sleep -Milliseconds 120
+                        $wshell.SendKeys('{ENTER}')
+                        Write-Log "Sent ENTER to PID=$($target.Id) Handle=$($target.MainWindowHandle) Title='$($target.MainWindowTitle)'"
+
+                        $closed = $false
+                        for ($i = 0; $i -lt 12; $i++) {
+                            Start-Sleep -Milliseconds 100
+                            $stillOpen = Get-Process -Id $target.Id -ErrorAction SilentlyContinue |
+                                Where-Object { $_.MainWindowHandle -eq $target.MainWindowHandle -and $_.MainWindowTitle -eq 'Information' }
+                            if (-not $stillOpen) {
+                                $closed = $true
+                                break
+                            }
+                        }
+
+                        if ($closed) {
+                            [void]$handled.Add($handleKey)
+                            $dismissed++
+                            Write-Log "Confirmed close for PID=$($target.Id) Handle=$($target.MainWindowHandle) Count=$dismissed/2"
+                        } else {
+                            Write-Log "Dialog still open for PID=$($target.Id) Handle=$($target.MainWindowHandle)"
+                        }
+
+                        if ($dismissed -ge 2) { break }
+                        Start-Sleep -Milliseconds 250
+                    } catch {
+                        Write-Log "Per-window error for PID=$($target.Id): $($_.Exception.Message)"
+                    }
+                }
+            } catch {
+                Write-Log "Loop error: $($_.Exception.Message)"
+            }
+
+            Start-Sleep -Milliseconds 150
+        }
+
+        Write-Log "Finished. Dismissed=$dismissed/2"
+    } -ArgumentList (Join-Path $PSScriptRoot "server_errors.log")
+}
+
+function Handle-ApiRegister($request, $response, $suppressorJob) {
     try {
         $encoding = $request.ContentEncoding
         if ($null -eq $encoding) { $encoding = [System.Text.Encoding]::UTF8 }
@@ -111,10 +168,11 @@ function Handle-ApiRegister($request, $response, $suppressorProcess) {
 
         # INSERT returned - dialogs have been dismissed (they blocked this call).
         # Kill the suppressor immediately; it must not linger after its job is done.
-        if ($suppressorProcess -and -not $suppressorProcess.HasExited) {
-            Write-Host "[NagSuppressor] INSERT complete - stopping suppressor (PID $($suppressorProcess.Id))."
-            Stop-Process -Id $suppressorProcess.Id -Force -ErrorAction SilentlyContinue
-            $suppressorProcess = $null
+        if ($suppressorJob -and $suppressorJob.State -eq 'Running') {
+            Write-Host "[NagSuppressor] INSERT complete - stopping suppressor job (ID $($suppressorJob.Id))."
+            Stop-Job -Id $suppressorJob.Id -ErrorAction SilentlyContinue
+            Remove-Job -Id $suppressorJob.Id -Force -ErrorAction SilentlyContinue
+            $suppressorJob = $null
         }
 
         # Save PDF
@@ -204,8 +262,9 @@ function Handle-ApiRegister($request, $response, $suppressorProcess) {
     } finally {
         if ($odbcConn -and $odbcConn.State -eq 'Open') { $odbcConn.Close() }
         # Safety net: kill suppressor if still alive (exception path).
-        if ($suppressorProcess -and -not $suppressorProcess.HasExited) {
-            Stop-Process -Id $suppressorProcess.Id -Force -ErrorAction SilentlyContinue
+        if ($suppressorJob) {
+            Stop-Job -Id $suppressorJob.Id -ErrorAction SilentlyContinue
+            Remove-Job -Id $suppressorJob.Id -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -269,14 +328,12 @@ try {
         }
 
         if ($req.Url.AbsolutePath -eq "/api/register" -and ($req.HttpMethod -eq "POST")) {
-            # Launch the nag suppressor the instant the POST is detected - before any DB work -
-            # so it has maximum time to compile and be ready when the INSERT triggers dialogs.
-            $nagScript = Join-Path $PSScriptRoot "nag_suppressor.ps1"
-            $nagProc   = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$nagScript`"" -WindowStyle Hidden -PassThru
-            Handle-ApiRegister $req $res $nagProc
-            # Belt-and-suspenders: ensure the suppressor is gone after the request completes.
-            if ($nagProc -and -not $nagProc.HasExited) {
-                Stop-Process -Id $nagProc.Id -Force -ErrorAction SilentlyContinue
+            # Launch a short-lived request-scoped suppressor job before DB work starts.
+            $nagJob = Start-NagSuppressorJob
+            Handle-ApiRegister $req $res $nagJob
+            if ($nagJob) {
+                Stop-Job -Id $nagJob.Id -ErrorAction SilentlyContinue
+                Remove-Job -Id $nagJob.Id -Force -ErrorAction SilentlyContinue
             }
         } else {
             Serve-Static $req $res
