@@ -1,28 +1,23 @@
 $ErrorActionPreference = 'Stop'
 
-$port = 5001
+$port = 48211
 $prefix = "http://*:$port/"
 $fallbackPrefix = "http://localhost:$port/"
 $listener = New-Object System.Net.HttpListener
 
-# --- Background Nag-Screen Dismisser ---
-# The DBISAM trial driver pops up an "Information" window every time it opens a connection.
-# This job runs in the background and clicks "OK" automatically.
-$nagJob = Start-Job -ScriptBlock {
-    Add-Type -AssemblyName System.Windows.Forms
-    while($true) {
-        $wshell = New-Object -ComObject WScript.Shell
-        # Find windows with "Information" or "DBISAM" in the title
-        $active = Get-Process | Where-Object { $_.MainWindowTitle -match "Information" -or $_.MainWindowTitle -match "DBISAM" }
-        foreach ($p in $active) {
-            $wshell.AppActivate($p.Id)
-            Start-Sleep -Milliseconds 100
-            $wshell.SendKeys("{ENTER}")
-            Write-Output "Dismissed nag screen for process $($p.Id)"
-        }
-        Start-Sleep -Seconds 1
-    }
+# Load Win32 API for targeted window closing
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32Helper {
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
 }
+"@
+
 
 try {
     $listener.Prefixes.Add($prefix)
@@ -40,7 +35,7 @@ try {
 $dbisamPath = 'E:\DentiMax\dentimaxdata\Smile You''re Golden'
 $documentCenter = 'E:\DentiMax\Document Center'
 
-function Handle-ApiRegister($request, $response) {
+function Handle-ApiRegister($request, $response, $suppressorProcess) {
     try {
         $encoding = $request.ContentEncoding
         if ($null -eq $encoding) { $encoding = [System.Text.Encoding]::UTF8 }
@@ -55,6 +50,7 @@ function Handle-ApiRegister($request, $response) {
         
         # 1. ODBC Connection
         $odbcConn = New-Object System.Data.Odbc.OdbcConnection("Driver={DBISAM 4 ODBC Driver};ConnectionType=Local;CatalogName=$dbisamPath;")
+        
         $odbcConn.Open()
         
         # Generate new Chart Number (simple approach: max + 1)
@@ -112,6 +108,14 @@ function Handle-ApiRegister($request, $response) {
         $insertPatCmd.Parameters[17].Value = 0
         
         [void]$insertPatCmd.ExecuteNonQuery()
+
+        # INSERT returned - dialogs have been dismissed (they blocked this call).
+        # Kill the suppressor immediately; it must not linger after its job is done.
+        if ($suppressorProcess -and -not $suppressorProcess.HasExited) {
+            Write-Host "[NagSuppressor] INSERT complete - stopping suppressor (PID $($suppressorProcess.Id))."
+            Stop-Process -Id $suppressorProcess.Id -Force -ErrorAction SilentlyContinue
+            $suppressorProcess = $null
+        }
 
         # Save PDF
         $fileName = "Intake_$newChartStr" + '_' + (Get-Date -Format "yyyyMMdd_HHmmss") + ".pdf"
@@ -199,6 +203,10 @@ function Handle-ApiRegister($request, $response) {
         $response.OutputStream.Write($buffer, 0, $buffer.Length)
     } finally {
         if ($odbcConn -and $odbcConn.State -eq 'Open') { $odbcConn.Close() }
+        # Safety net: kill suppressor if still alive (exception path).
+        if ($suppressorProcess -and -not $suppressorProcess.HasExited) {
+            Stop-Process -Id $suppressorProcess.Id -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -261,7 +269,15 @@ try {
         }
 
         if ($req.Url.AbsolutePath -eq "/api/register" -and ($req.HttpMethod -eq "POST")) {
-            Handle-ApiRegister $req $res
+            # Launch the nag suppressor the instant the POST is detected - before any DB work -
+            # so it has maximum time to compile and be ready when the INSERT triggers dialogs.
+            $nagScript = Join-Path $PSScriptRoot "nag_suppressor.ps1"
+            $nagProc   = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$nagScript`"" -WindowStyle Hidden -PassThru
+            Handle-ApiRegister $req $res $nagProc
+            # Belt-and-suspenders: ensure the suppressor is gone after the request completes.
+            if ($nagProc -and -not $nagProc.HasExited) {
+                Stop-Process -Id $nagProc.Id -Force -ErrorAction SilentlyContinue
+            }
         } else {
             Serve-Static $req $res
         }

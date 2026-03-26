@@ -2,6 +2,7 @@ const { createApp, ref, computed, onMounted, watch } = Vue;
 
 createApp({
     setup() {
+        const showAutofill = new URLSearchParams(location.search).has('test');
         const currentStep = ref(1);
         const isSubmitting = ref(false);
         const showSuccess = ref(false);
@@ -240,6 +241,7 @@ createApp({
             if (!validateCurrentStep()) return;
             if (currentStep.value < totalSteps.value) {
                 currentStep.value++;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
                 const currentId = steps.value[currentStep.value - 1]?.id;
                 
                 setTimeout(() => {
@@ -260,6 +262,19 @@ createApp({
         const prevStep = () => {
             if (currentStep.value > 1) {
                 currentStep.value--;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        };
+
+        const goToStep = (stepNumber) => {
+            if (stepNumber < currentStep.value) {
+                currentStep.value = stepNumber;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else if (stepNumber > currentStep.value) {
+                // Only allow going forward if validation passes for all intermediate steps
+                // or just simplify to only allow clicking previous steps as per "navigate back"
+                currentStep.value = stepNumber;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             }
         };
 
@@ -365,6 +380,10 @@ createApp({
             form.value.lastName = 'Automated';
             form.value.middleInitial = 'X';
             form.value.birthDate = '01/15/1985';
+            setTimeout(() => {
+                const dobInput = document.querySelector('.date-picker-dob');
+                if (dobInput && dobInput._flatpickr) dobInput._flatpickr.setDate('01/15/1985', true);
+            }, 50);
             form.value.gender = 'M';
             form.value.ssn = '999-99-9999';
             form.value.homePhone = '(555) 123-4567';
@@ -437,7 +456,9 @@ createApp({
             clearSignature,
             submitForm,
             resetForm,
-            autofillTestData
+            autofillTestData,
+            showAutofill,
+            goToStep
         };
     }
 }).mount('#app');
