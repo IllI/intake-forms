@@ -73,30 +73,82 @@ input:focus, textarea:focus { border-color: var(--primary); outline: none; box-s
 .legal-scroll-box { font-size: 0.9rem; padding: 1.5rem; border-radius: 12px; margin-bottom: 1rem; line-height: 1.6; border: 1px solid #eee; background: #fff; box-shadow: 0 4px 15px rgba(0,0,0,0.02); }
 
 /* Consent Form Styling */
-.form-main-title { text-align: center; font-size: 1.2rem; text-decoration: underline; margin-bottom: 1rem; }
-.patient-header-info { display: flex; justify-content: space-between; padding: 0.5rem; background: #f9f9f9; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
-.instruction-text { font-style: italic; font-size: 0.85rem; margin-bottom: 1.5rem; text-align: center; }
+.consent-sheet { color: #433e4a; }
+.form-main-title { text-align: center; font-size: 1.15rem; letter-spacing: 0.03em; text-decoration: underline; text-underline-offset: 0.12em; margin: 0 0 0.8rem; }
+.patient-header-info { display: flex; justify-content: space-between; gap: 1rem; padding: 0 0 0.3rem; margin-bottom: 0.55rem; font-size: 0.86rem; border-bottom: 1px solid #cfc8d2; border-radius: 0; background: transparent; }
+.consent-header-field { display: flex; align-items: center; gap: 0.35rem; flex: 1; font-size: 0.86rem; color: #5f5664; }
+.consent-header-field input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    border-bottom: 1px solid #bdb5c1;
+    border-radius: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    color: #433e4a;
+    height: 1.3rem;
+    padding: 0 0.15rem;
+}
+.consent-header-date { max-width: 19rem; }
+.instruction-text { font-style: italic; font-size: 0.84rem; margin-bottom: 1rem; text-align: center; color: #6f6574; }
 
-.consent-block { margin-bottom: 1.5rem; }
-.block-title { font-weight: 700; font-size: 1rem; color: #333; }
-.block-body { padding-left: 2.2rem; margin-top: 0.5rem; font-size: 0.9rem; line-height: 1.5; color: #444; }
+.consent-block { margin-bottom: 0.75rem; }
+.block-title { font-weight: 700; font-size: 1rem; color: #615767; text-decoration: underline; text-underline-offset: 0.08em; margin-bottom: 0.2rem; }
+.block-body { padding-left: 0.75rem; margin-top: 0; font-size: 0.84rem; line-height: 1.22; color: #4b434f; }
+.consent-copy { margin: 0; }
+.consent-section-toggle { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.15rem; cursor: pointer; }
+.consent-section-toggle input[type="checkbox"] { width: 0.95rem; height: 0.95rem; margin: 0; accent-color: #7d7384; }
+.consent-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; margin: 0.35rem 0 0.55rem; }
+.consent-choice { min-height: 2.75rem; padding: 0.6rem 0.5rem; border-radius: 10px; }
+.consent-choice span { font-size: 0.84rem; font-weight: 600; }
 
-.inline-checkbox-group { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 1rem 0; }
-.detail-line { display: flex; gap: 1.5rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
-.detail-line span { display: flex; align-items: center; gap: 0.5rem; }
-.detail-line input, .detail-line select { padding: 0.4rem; height: auto; }
+.consent-detail-line { display: flex; gap: 0.8rem; align-items: center; margin-top: 0.15rem; flex-wrap: wrap; }
+.consent-detail-line span { display: inline-flex; align-items: baseline; gap: 0.3rem; white-space: nowrap; }
 
-.checkbox-container { display: flex; align-items: center; cursor: pointer; position: relative; padding-left: 2rem; font-size: 0.9rem; }
-.checkbox-container input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
-.checkmark { position: absolute; top: 0; left: 0; height: 1.2rem; width: 1.2rem; background-color: #eee; border: 1px solid #ccc; border-radius: 4px; }
-.checkbox-container:hover input ~ .checkmark { background-color: #ddd; }
-.checkbox-container input:checked ~ .checkmark { background-color: var(--primary); border-color: var(--primary); }
-.checkmark:after { content: ""; position: absolute; display: none; }
-.checkbox-container input:checked ~ .checkmark:after { display: block; }
-.checkbox-container .checkmark:after { left: 6px; top: 2px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.consent-inline-fill { display: inline-block; min-width: 4.9rem; margin-left: 0.18rem; vertical-align: baseline; border-bottom: 1px solid #bdb5c1; }
+.consent-inline-fill.short { min-width: 8rem; }
+.consent-inline-fill input,
+.consent-detail-line input,
+.consent-detail-line select {
+    width: 100%;
+    min-width: 3rem;
+    padding: 0 0.12rem;
+    border: none;
+    border-bottom: 1px solid #bdb5c1;
+    border-radius: 0;
+    background: transparent;
+    font: inherit;
+    line-height: 1.1;
+    height: 1.1rem;
+}
+.consent-detail-line input { min-width: 4rem; }
+.consent-detail-line select { min-width: 4.8rem; appearance: none; }
+.consent-inline-fill input:focus,
+.consent-detail-line input:focus,
+.consent-detail-line select:focus,
+.initial-input:focus,
+.auto-grow-inline:focus,
+.consent-header-field input:focus { outline: none; border-bottom-color: #7a6f80; }
 
-.initials-row { margin-top: 0.5rem; text-align: right; }
-.initial-input { width: 50px !important; text-align: center; border: none; border-bottom: 1px solid #333; font-weight: bold; border-radius: 0; font-family: 'Outfit'; }
+.auto-grow-inline {
+    display: inline-block;
+    min-width: 8ch;
+    max-width: 100%;
+    border: none;
+    border-bottom: 1px solid #bdb5c1;
+    border-radius: 0;
+    background: transparent;
+    font: inherit;
+    line-height: 1.1;
+    padding: 0 0.12rem;
+    vertical-align: baseline;
+}
+
+.initials-row { margin-top: 0.08rem; text-align: right; }
+.initials-label { font-size: 0.8rem; color: #6c6371; }
+.initial-input { width: 2.2rem !important; text-align: center; border: none; border-bottom: 1px solid #333; font-weight: 600; border-radius: 0; background: transparent; font-family: 'Outfit'; }
+.final-legal { margin-top: 0.8rem; font-size: 0.82rem; line-height: 1.24; }
 
 /* Signature Section */
 .signature-layout { display: grid; grid-template-columns: 1fr 250px; gap: 2rem; margin-top: 1rem; }
@@ -143,4 +195,5 @@ button { padding: 0.8rem 1.8rem; border-radius: 25px; border: none; font-weight:
     .card.glass { padding: 1.5rem 1rem; }
     .detail-line { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
     .patient-header-info { flex-direction: column; gap: 0.5rem; }
+    .consent-choice-grid { grid-template-columns: 1fr; }
 }

@@ -97,7 +97,7 @@ createApp({
                 otherDetails: ''
             },
             consent: {
-                sec1: { checked: false, fillings: false, bridges: false, crowns: false, extractions: false, impacted: '', anesthesia: 'LOCAL', rootCanals: '', other: '', initials: '' },
+                sec1: { checked: false, workDone: [], impacted: '', anesthesia: 'LOCAL', rootCanals: '', other: '', initials: '' },
                 sec2: { checked: false, initials: '' },
                 sec3: { checked: false, initials: '' },
                 sec4: { checked: false, teeth: '', initials: '' },
@@ -209,7 +209,28 @@ createApp({
             }
 
             if (stepId === 'consent') {
+                const checkedSections = [];
                 for (let i = 1; i <= 8; i++) {
+                    if (form.value.consent['sec'+i].checked) {
+                        checkedSections.push(i);
+                    }
+                }
+                if (checkedSections.length === 0) {
+                    alert("Please check at least one consent section.");
+                    return false;
+                }
+                if (form.value.consent.sec1.checked) {
+                    const sec1 = form.value.consent.sec1;
+                    if (sec1.workDone.length === 0 && !sec1.other?.trim()) {
+                        alert("Please select at least one item for Work To Be Done or enter an Other description.");
+                        return false;
+                    }
+                }
+                if (form.value.consent.sec4.checked && !form.value.consent.sec4.teeth?.trim()) {
+                    alert("Please enter the teeth to be removed for section 4.");
+                    return false;
+                }
+                for (const i of checkedSections) {
                     if (!form.value.consent['sec'+i].initials) {
                         alert(`Please provide your initials for Legal Section ${i}.`);
                         return false;

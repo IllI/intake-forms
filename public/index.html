@@ -455,43 +455,59 @@
 
                 <!-- Step 4: Dental Treatment Consent -->
                 <section v-show="steps[currentStep - 1]?.id === 'consent'" class="fade-in consent-form-container">
-                    <div class="consent-header">
+                    <div class="consent-header consent-sheet">
                         <h2 class="form-main-title">DENTAL TREATMENT CONSENT FORM</h2>
                         <div class="patient-header-info">
-                            <span>Patient Name: <strong>{{ form.firstName }} {{ form.middleInitial ? form.middleInitial
-                                    + '.' : '' }} {{ form.lastName }}</strong></span>
-                            <span>Birthdate: <strong>{{ form.birthDate }}</strong></span>
+                            <label class="consent-header-field">
+                                <span>Patient Name</span>
+                                <input type="text"
+                                    :value="`${form.firstName} ${form.middleInitial ? form.middleInitial + '. ' : ''}${form.lastName}`.trim()"
+                                    readonly>
+                            </label>
+                            <label class="consent-header-field consent-header-date">
+                                <span>Birthdate</span>
+                                <input type="text" class="date-picker-dob" v-model="form.birthDate" placeholder="MM/DD/YYYY">
+                            </label>
                         </div>
                         <p class="instruction-text">Please read and initial the items checked below. Then read and sign
                             the section at the bottom of form.</p>
                     </div>
 
-                    <div class="legal-content">
+                    <div class="legal-content consent-sheet">
                         <!-- Section 1 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec1.checked">
                                 <span class="block-title">1. WORK TO BE DONE</span>
                             </label>
-                            <div class="block-body">
-                                <p>I understand that I am having the following work done: </p>
-                                <div class="inline-checkbox-group">
-                                    <label><input type="checkbox" v-model="form.consent.sec1.fillings"> Fillings</label>
-                                    <label><input type="checkbox" v-model="form.consent.sec1.bridges"> Bridges</label>
-                                    <label><input type="checkbox" v-model="form.consent.sec1.crowns"> Crowns</label>
-                                    <label><input type="checkbox" v-model="form.consent.sec1.extractions">
-                                        Extractions</label>
+                            <div v-show="form.consent.sec1.checked" class="block-body">
+                                <div class="consent-choice-grid">
+                                    <label :class="['pill-checkbox', 'consent-choice', { 'selected': form.consent.sec1.workDone.includes('Fillings') }]">
+                                        <input type="checkbox" v-model="form.consent.sec1.workDone" value="Fillings">
+                                        <span>Fillings</span>
+                                    </label>
+                                    <label :class="['pill-checkbox', 'consent-choice', { 'selected': form.consent.sec1.workDone.includes('Bridges') }]">
+                                        <input type="checkbox" v-model="form.consent.sec1.workDone" value="Bridges">
+                                        <span>Bridges</span>
+                                    </label>
+                                    <label :class="['pill-checkbox', 'consent-choice', { 'selected': form.consent.sec1.workDone.includes('Crowns') }]">
+                                        <input type="checkbox" v-model="form.consent.sec1.workDone" value="Crowns">
+                                        <span>Crowns</span>
+                                    </label>
+                                    <label :class="['pill-checkbox', 'consent-choice', { 'selected': form.consent.sec1.workDone.includes('Extractions') }]">
+                                        <input type="checkbox" v-model="form.consent.sec1.workDone" value="Extractions">
+                                        <span>Extractions</span>
+                                    </label>
                                 </div>
-                                <div class="detail-line">
-                                    <span>Impacted teeth removed: <input type="text"
-                                            v-model="form.consent.sec1.impacted"></span>
-                                    <span>Anesthesia: <select v-model="form.consent.sec1.anesthesia">
-                                            <option value="LOCAL">LOCAL</option>
-                                            <option value="General">General</option>
-                                        </select></span>
-                                </div>
-                                <div class="detail-line">
-                                    <span>Root Canals: <input type="text" v-model="form.consent.sec1.rootCanals"></span>
-                                    <span>Other: <input type="text" v-model="form.consent.sec1.other"></span>
+                                <div class="detail-line consent-detail-line">
+                                    <span>Impacted teeth removed
+                                        <input type="text" v-model="form.consent.sec1.impacted"></span>
+                                    <span>LOCAL Anesthesia
+                                        <input type="text" v-model="form.consent.sec1.anesthesia"></span>
+                                    <span>Root Canals
+                                        <input type="text" v-model="form.consent.sec1.rootCanals"></span>
+                                    <span>Other
+                                        <input type="text" v-model="form.consent.sec1.other"></span>
                                 </div>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
@@ -502,11 +518,12 @@
 
                         <!-- Section 2 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">                                
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec2.checked">
                                 <span class="block-title">2. DRUGS AND MEDICATIONS</span>
                             </label>
-                            <div class="block-body">
-                                <p>I understand that antibiotics and analgesics and other medications can cause allergic reactions causing redness and swelling of tissues, pain, itching, vomiting, and/or anaphylactic shock (severe allergic reaction).</p>
+                            <div v-show="form.consent.sec2.checked" class="block-body">
+                                <p class="consent-copy">I understand that antibiotics and analgesics and other medications can cause allergic reactions causing redness and swelling of tissues, pain, itching, vomiting, and/or anaphylactic shock (severe allergic reaction).</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec2.initials" maxlength="3">)</span>
@@ -516,11 +533,12 @@
 
                         <!-- Section 3 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec3.checked">
                                 <span class="block-title">3. CHANGES IN TREATMENT PLAN</span>
                             </label>
-                            <div class="block-body">
-                                <p>I understand that during treatment it may be necessary to change or add procedures because of conditions found while working on the teeth that were not discovered during examination, the most common being root canal therapy following routine restorative procedures. I give my permission to the Dentist to make any/all changes and additions as necessary.</p>
+                            <div v-show="form.consent.sec3.checked" class="block-body">
+                                <p class="consent-copy">I understand that during treatment it may be necessary to change or add procedures because of conditions found while working on the teeth that were not discovered during examination, the most common being root canal therapy following routine restorative procedures. I give my permission to the Dentist to make any/all changes and additions as necessary.</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec3.initials" maxlength="3">)</span>
@@ -530,12 +548,12 @@
 
                         <!-- Section 4 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
-                                <span class="checkmark"></span>
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec4.checked">
                                 <span class="block-title">4. REMOVAL OF TEETH</span>
                             </label>
-                            <div class="block-body">
-                                <p>Alternatives to removal have been explained to me (root canal therapy, crowns, and periodontal surgery, etc.) and I authorize the Dentist to remove the following teeth <input type="text" v-model="form.consent.sec4.teeth" style="width: 150px;"> and any others necessary for reasons in paragraph #3. I understand removing teeth does not always remove all the infection, if present, and it may be necessary to have further treatment. I understand the risks involved in having teeth removed, some of which are pain, swelling, spread of infection, dry socket, loss of feeling in my teeth, lips, tongue and surrounding tissue (Paresthesia) that can last for an indefinite period of time (days or months) or fractured jaw. I understand I may need further treatment by a specialist or even hospitalization if complications arise during or following treatment, the cost of which is my responsibility.</p>
+                            <div v-show="form.consent.sec4.checked" class="block-body">
+                                <p class="consent-copy">Alternatives to removal have been explained to me (root canal therapy, crowns, and periodontal surgery, etc.) and I authorize the Dentist to remove the following teeth <input type="text" class="auto-grow-inline" v-model="form.consent.sec4.teeth" :style="{ width: `${Math.max(8, (form.consent.sec4.teeth || '').length + 1)}ch` }"> and any others necessary for reasons in paragraph #3. I understand removing teeth does not always remove all the infection, if present, and it may be necessary to have further treatment. I understand the risks involved in having teeth removed, some of which are pain, swelling, spread of infection, dry socket, loss of feeling in my teeth, lips, tongue and surrounding tissue (Paresthesia) that can last for an indefinite period of time (days or months) or fractured jaw. I understand I may need further treatment by a specialist or even hospitalization if complications arise during or following treatment, the cost of which is my responsibility.</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec4.initials" maxlength="3">)</span>
@@ -545,12 +563,12 @@
 
                         <!-- Section 5 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
-                                <span class="checkmark"></span>
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec5.checked">
                                 <span class="block-title">5. CROWN, BRIDGES AND CAPS</span>
                             </label>
-                            <div class="block-body">
-                                <p>I understand that sometimes it is not possible to match the color of natural teeth exactly with artificial teeth. I further understand that I may be wearing temporary crowns, which may come off easily and that I must be careful to ensure that they are kept on until the permanent crowns are delivered. I realize the final opportunity to make changes in my new crown, bridge, or cap (including shape, fit, size, and color) will be before cementation.</p>
+                            <div v-show="form.consent.sec5.checked" class="block-body">
+                                <p class="consent-copy">I understand that sometimes it is not possible to match the color of natural teeth exactly with artificial teeth. I further understand that I may be wearing temporary crowns, which may come off easily and that I must be careful to ensure that they are kept on until the permanent crowns are delivered. I realize the final opportunity to make changes in my new crown, bridge, or cap (including shape, fit, size, and color) will be before cementation.</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec5.initials" maxlength="3">)</span>
@@ -560,12 +578,12 @@
 
                         <!-- Section 6 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
-                                <span class="checkmark"></span>
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec6.checked">
                                 <span class="block-title">6. DENTURES, COMPLETE OR PARTIAL</span>
                             </label>
-                            <div class="block-body">
-                                <p>I realize that full or partial dentures are artificial, constructed of plastic, metal, and/or porcelain. The problems of wearing these appliances have been explained to me, including looseness, soreness, and possible breakage. I realize the final opportunity to make changes in my new dentures (including shape, fit, size, placement, and color) will be the "teeth in wax" try-in visit. I understand that most dentures require relining approximately three to twelve months after initial placement. The cost for this procedure is not included in the initial denture fee.</p>
+                            <div v-show="form.consent.sec6.checked" class="block-body">
+                                <p class="consent-copy">I realize that full or partial dentures are artificial, constructed of plastic, metal, and/or porcelain. The problems of wearing these appliances have been explained to me, including looseness, soreness, and possible breakage. I realize the final opportunity to make changes in my new dentures (including shape, fit, size, placement, and color) will be the "teeth in wax" try-in visit. I understand that most dentures require relining approximately three to twelve months after initial placement. The cost for this procedure is not included in the initial denture fee.</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec6.initials" maxlength="3">)</span>
@@ -575,12 +593,12 @@
 
                         <!-- Section 7 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
-                                <span class="checkmark"></span>
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec7.checked">
                                 <span class="block-title">7. ENDODONTIC TREATMENT (ROOT CANAL)</span>
                             </label>
-                            <div class="block-body">
-                                <p>I realize there is no guarantee that root canal treatment will save my tooth, and that complications can occur from the treatment, and that occasionally metal objects are cemented in the tooth or extend through the root, which does not necessarily affect the success of the treatment. I understand that occasionally additional surgical procedures may be necessary following root canal treatment (apicoectomy).</p>
+                            <div v-show="form.consent.sec7.checked" class="block-body">
+                                <p class="consent-copy">I realize there is no guarantee that root canal treatment will save my tooth, and that complications can occur from the treatment, and that occasionally metal objects are cemented in the tooth or extend through the root, which does not necessarily affect the success of the treatment. I understand that occasionally additional surgical procedures may be necessary following root canal treatment (apicoectomy).</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec7.initials" maxlength="3">)</span>
@@ -590,12 +608,12 @@
 
                         <!-- Section 8 -->
                         <div class="consent-block">
-                            <label class="checkbox-container">
-                                <span class="checkmark"></span>
+                            <label class="consent-section-toggle">
+                                <input type="checkbox" v-model="form.consent.sec8.checked">
                                 <span class="block-title">8. PERIODONTAL LOSS (TISSUE & BONE)</span>
                             </label>
-                            <div class="block-body">
-                                <p>I understand that I have a serious condition, causing gum and bone infection or loss and that it can lead to the loss of my teeth. Alternative treatment plans have been explained to me, including gum surgery, replacements and/or extractions. I understand that undertaking any dental procedures may have a future adverse effect on my periodontal condition.</p>
+                            <div v-show="form.consent.sec8.checked" class="block-body">
+                                <p class="consent-copy">I understand that I have a serious condition, causing gum and bone infection or loss and that it can lead to the loss of my teeth. Alternative treatment plans have been explained to me, including gum surgery, replacements and/or extractions. I understand that undertaking any dental procedures may have a future adverse effect on my periodontal condition.</p>
                                 <div class="initials-row">
                                     <span class="initials-label">(Initials <input type="text" class="initial-input"
                                             v-model="form.consent.sec8.initials" maxlength="3">)</span>
@@ -604,7 +622,7 @@
                         </div>
 
                         <div class="final-legal">
-                            <p>I understand that dentistry is not an exact science and that, therefore, reputable practitioners cannot guarantee results. I acknowledge that no guarantee or assurance has been made to me by anyone regarding the dental treatment that I have requested and authorized for my self or my minor child. I have had full opportunity to discuss and ask questions regarding the dental treatment, and all questions have been answered to my satisfaction.</p>
+                            <p class="consent-copy">I understand that dentistry is not an exact science and that, therefore, reputable practitioners cannot guarantee results. I acknowledge that no guarantee or assurance has been made to me by anyone regarding the dental treatment that I have requested and authorized for my self or my minor child. I have had full opportunity to discuss and ask questions regarding the dental treatment, and all questions have been answered to my satisfaction.</p>
                         </div>
                     </div>
                 </section>
