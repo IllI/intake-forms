@@ -34,7 +34,11 @@ window.SYGApi = (() => {
             body: JSON.stringify(criteria)
         });
 
-        return result.matches || [];
+        const payloadMatches = result.matches || [];
+        if (Array.isArray(payloadMatches)) {
+            return payloadMatches;
+        }
+        return payloadMatches ? [payloadMatches] : [];
     }
 
     async function createIntake(payload) {
