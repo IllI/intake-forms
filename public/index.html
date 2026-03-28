@@ -36,7 +36,86 @@
             <div class="blob blob3"></div>
         </div>
 
-        <div class="container" id="printable-area">
+        <div class="container landing-shell" v-if="appStage === 'landing'">
+            <div class="card glass landing-card fade-in">
+                <img src="logo.png" alt="Smile You're Golden Logo" class="practice-logo landing-logo">
+                <p class="landing-kicker">Smile You're Golden Dental</p>
+                <h1 class="landing-title">Choose Your Check-In</h1>
+                <p class="landing-copy">Start a full new-patient intake, or check in returning members of the Golden Family with prefilled information.</p>
+                <div class="landing-actions">
+                    <button class="landing-button landing-button-primary" @click="startNewPatient">New Patient</button>
+                    <button class="landing-button landing-button-secondary" @click="startReturningPatient">Golden Family</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="container flow-shell" v-if="appStage === 'lookup'">
+            <div class="card glass fade-in">
+                <div class="lookup-header">
+                    <p class="landing-kicker">Golden Family Check-In</p>
+                    <h1 class="landing-title">Find Your Patient Record</h1>
+                    <p class="landing-copy">Enter first name, last name, and birthday. We will match carefully and let you confirm the right patient before check-in starts.</p>
+                </div>
+
+                <div class="form-grid lookup-grid">
+                    <div class="input-group">
+                        <label>First Name</label>
+                        <input type="text" v-model="lookupForm.firstName" placeholder="First Name">
+                    </div>
+                    <div class="input-group">
+                        <label>Last Name</label>
+                        <input type="text" v-model="lookupForm.lastName" placeholder="Last Name">
+                    </div>
+                    <div class="input-group full-width">
+                        <label>Date of Birth</label>
+                        <input type="text" class="date-picker-dob" v-model="lookupForm.birthDate" placeholder="MM/DD/YYYY">
+                    </div>
+                </div>
+
+                <div class="actions no-print">
+                    <button class="btn-prev" @click="resetForm">Back</button>
+                    <button class="btn-submit" @click="searchReturningPatients" :disabled="lookupLoading">
+                        <span v-if="!lookupLoading">Find Patient</span>
+                        <div v-else class="loader"></div>
+                    </button>
+                </div>
+
+                <p v-if="lookupError" class="lookup-error">{{ lookupError }}</p>
+
+                <div v-if="lookupMatches.length" class="match-list">
+                    <button v-for="match in lookupMatches" :key="match.chartNumber" class="match-card" @click="chooseReturningPatient(match)">
+                        <span class="match-name">{{ match.firstName }} {{ match.lastName }}</span>
+                        <span class="match-meta">DOB {{ match.birthDate }}</span>
+                        <span class="match-meta" v-if="match.mobile">Mobile {{ match.mobile }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="container flow-shell" v-if="appStage === 'returningSelect'">
+            <div class="card glass fade-in">
+                <div class="lookup-header">
+                    <p class="landing-kicker">Golden Family Check-In</p>
+                    <h1 class="landing-title">Choose Forms for {{ patientDisplayName }}</h1>
+                    <p class="landing-copy">Select only the forms the doctor or technician wants completed today. The record is prefilled where this backend can supply data.</p>
+                </div>
+
+                <div class="step-selector-grid">
+                    <label v-for="step in availableSteps" :key="step.id" :class="['step-selector-card', { selected: selectedStepIds.includes(step.id) }]">
+                        <input type="checkbox" v-model="selectedStepIds" :value="step.id">
+                        <span class="step-selector-title">{{ step.title }}</span>
+                        <span class="step-selector-subtitle">{{ step.subtitle }}</span>
+                    </label>
+                </div>
+
+                <div class="actions no-print">
+                    <button class="btn-prev" @click="startReturningPatient">Back</button>
+                    <button class="btn-submit" @click="beginReturningCheckIn">Start Check-In</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="container" id="printable-area" v-if="appStage === 'intake'">
             <!-- Header -->
             <div class="header no-print">
                 <img src="logo.png" alt="Smile You're Golden Logo" class="practice-logo">
@@ -44,6 +123,7 @@
                     <p><strong>Smile You're Golden Dental</strong></p>
                     <p>200 Chicago Ave, Oak Park, IL 60302</p>
                 </div>
+                <div v-if="isReturningMode" class="patient-badge">Golden Family Check-In: {{ patientDisplayName }}</div>
                 <h1>{{ currentStepTitle }}</h1>
                 <p>{{ currentStepSubtitle }}</p>
             </div>
@@ -787,7 +867,12 @@
             <div class="actions no-print">
                 <button v-if="currentStep > 1" @click="prevStep" class="btn-prev">Back</button>
                 <button v-if="currentStep < totalSteps" @click="nextStep" class="btn-next">Continue</button>
-                <button v-if="currentStep === totalSteps" @click="submitForm" class="btn-submit"
+                <button v-if="isReturningMode" @click="submitForm" class="btn-submit"
+                    :disabled="!canSaveAndCheckIn">
+                    <span v-if="!isSubmitting">Save and Check In</span>
+                    <div v-else class="loader"></div>
+                </button>
+                <button v-if="!isReturningMode && currentStep === totalSteps" @click="submitForm" class="btn-submit"
                     :disabled="isSubmitting">
                     <span v-if="!isSubmitting">Complete Intake</span>
                     <div v-else class="loader"></div>
@@ -799,11 +884,10 @@
         <div class="overlay" v-if="showSuccess">
             <div class="overlay-content fade-in">
                 <div class="checkmark-animation">✓</div>
-                <h2>You're All Set!</h2>
-                <p>Welcome to Smile You're Golden. Please hand the iPad back to the front desk.</p>
+                <h2>{{ successTitle }}</h2>
+                <p>{{ successMessage }}</p>
                 <button @click="resetForm" class="btn-primary"
-                    style="margin-top:20px; padding:10px 20px; border-radius:20px; background:var(--primary); color:white; border:none; cursor:pointer;">New
-                    Patient Intake</button>
+                    style="margin-top:20px; padding:10px 20px; border-radius:20px; background:var(--primary); color:white; border:none; cursor:pointer;">{{ successButtonLabel }}</button>
             </div>
         </div>
 
@@ -818,6 +902,8 @@
         </div>
     </div>
 
+    <script src="models.js"></script>
+    <script src="api.js"></script>
     <script src="app.js"></script>
 </body>
 
