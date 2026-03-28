@@ -15,6 +15,8 @@ createApp({
         const selectedStepIds = ref([]);
         const hasEdited = ref(false);
         const suppressDirtyTracking = ref(false);
+        const initialFormSnapshot = ref(SYGModels.buildInitialForm());
+        const signatureDirty = ref({ cancellation: false, hipaa: false, signature: false });
 
         const configuredSteps = SYGModels.getConfiguredSteps();
         const availableSteps = configuredSteps;
@@ -98,6 +100,30 @@ createApp({
             }
         }
 
+        function cloneFormState(source) {
+            return JSON.parse(JSON.stringify(source));
+        }
+
+        function getEditedStepIds() {
+            if (!isReturningMode.value) {
+                return steps.value.map(step => step.id);
+            }
+
+            const dirty = SYGModels.getDirtyStepIds(form.value, initialFormSnapshot.value, {
+                signatures: signatureDirty.value
+            });
+            return steps.value
+                .map(step => step.id)
+                .filter(stepId => dirty.includes(stepId));
+        }
+
+        function refreshDirtyState() {
+            if (!isReturningMode.value || appStage.value !== 'intake' || suppressDirtyTracking.value) {
+                return;
+            }
+            hasEdited.value = getEditedStepIds().length > 0;
+        }
+
         function resetPads() {
             signaturePadCancellation = null;
             signaturePadHipaa = null;
@@ -114,6 +140,8 @@ createApp({
                 currentStep.value = 1;
                 steps.value = [...configuredSteps];
                 hasEdited.value = false;
+                initialFormSnapshot.value = cloneFormState(form.value);
+                signatureDirty.value = { cancellation: false, hipaa: false, signature: false };
                 autoNameSeed = '';
             });
             resetPads();
@@ -169,7 +197,13 @@ createApp({
 
             const pad = new SignaturePad(canvas, {
                 backgroundColor: 'rgba(255, 255, 255, 0)',
-                penColor: 'rgb(0, 0, 0)'
+                penColor: 'rgb(0, 0, 0)',
+                onEnd: () => {
+                    if (type === 'cancellation') signatureDirty.value.cancellation = true;
+                    if (type === 'hipaa') signatureDirty.value.hipaa = true;
+                    if (type === 'final') signatureDirty.value.signature = true;
+                    refreshDirtyState();
+                }
             });
 
             const onResize = () => resizeCanvas(canvas, pad);
@@ -189,9 +223,19 @@ createApp({
         }
 
         function clearSignature(type) {
-            if (type === 'cancellation' && signaturePadCancellation) signaturePadCancellation.clear();
-            if (type === 'hipaa' && signaturePadHipaa) signaturePadHipaa.clear();
-            if (type === 'final' && signaturePadFinal) signaturePadFinal.clear();
+            if (type === 'cancellation' && signaturePadCancellation) {
+                signaturePadCancellation.clear();
+                signatureDirty.value.cancellation = false;
+            }
+            if (type === 'hipaa' && signaturePadHipaa) {
+                signaturePadHipaa.clear();
+                signatureDirty.value.hipaa = false;
+            }
+            if (type === 'final' && signaturePadFinal) {
+                signaturePadFinal.clear();
+                signatureDirty.value.signature = false;
+            }
+            refreshDirtyState();
         }
 
         function validateConsent() {
@@ -315,16 +359,20 @@ createApp({
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function renderPdfs() {
+        async function renderPdfs(stepIds = null) {
             const element = document.getElementById('printable-area');
             const originalStep = currentStep.value;
             const pdfs = [];
             document.body.classList.add('generating-pdf');
+            const renderSteps = stepIds && stepIds.length
+                ? steps.value.filter(step => stepIds.includes(step.id))
+                : steps.value;
 
             try {
-                for (let i = 0; i < steps.value.length; i++) {
-                    const step = steps.value[i];
-                    currentStep.value = i + 1;
+                for (const step of renderSteps) {
+                    const stepIndex = steps.value.findIndex(candidate => candidate.id === step.id);
+                    if (stepIndex < 0) { continue; }
+                    currentStep.value = stepIndex + 1;
                     await nextTick();
                     initCurrentStepArtifacts();
                     await new Promise(resolve => setTimeout(resolve, 400));
@@ -365,11 +413,13 @@ createApp({
 
             isSubmitting.value = true;
             try {
-                const pdfs = await renderPdfs();
+                const editedStepIds = getEditedStepIds();
+                const pdfs = await renderPdfs(isReturningMode.value ? editedStepIds : null);
                 const payload = {
                     ...form.value,
                     flowType: currentMode.value,
                     selectedStepIds: steps.value.map(step => step.id),
+                    editedStepIds,
                     pdfs
                 };
 
@@ -382,6 +432,8 @@ createApp({
 
                 showSuccess.value = true;
                 hasEdited.value = false;
+                initialFormSnapshot.value = cloneFormState(form.value);
+                signatureDirty.value = { cancellation: false, hipaa: false, signature: false };
             } catch (err) {
                 alert(`Submission error: ${err.message}`);
             } finally {
@@ -436,6 +488,8 @@ createApp({
             await withoutDirtyTracking(async () => {
                 form.value = SYGModels.applyPatientToForm(match);
                 autoNameSeed = simpleFullName();
+                initialFormSnapshot.value = cloneFormState(form.value);
+                signatureDirty.value = { cancellation: false, hipaa: false, signature: false };
                 hasEdited.value = false;
             });
             appStage.value = 'returningSelect';
@@ -451,6 +505,8 @@ createApp({
             steps.value = configuredSteps.filter(step => selectedStepIds.value.includes(step.id));
             currentStep.value = 1;
             hasEdited.value = false;
+            initialFormSnapshot.value = cloneFormState(form.value);
+            signatureDirty.value = { cancellation: false, hipaa: false, signature: false };
             appStage.value = 'intake';
             await nextTick();
             initDatePickers();
@@ -491,9 +547,7 @@ createApp({
         watch(form, () => {
             applyMasks();
             syncDerivedNames();
-            if (isReturningMode.value && appStage.value === 'intake' && !suppressDirtyTracking.value) {
-                hasEdited.value = true;
-            }
+            refreshDirtyState();
         }, { deep: true });
 
         watch([appStage, currentStep], async () => {

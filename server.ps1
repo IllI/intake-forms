@@ -146,10 +146,10 @@ function Get-LevenshteinDistance([string]$source, [string]$target) {
     for ($i = 1; $i -le $source.Length; $i++) {
         for ($j = 1; $j -le $target.Length; $j++) {
             $cost = if ($source[$i - 1] -eq $target[$j - 1]) { 0 } else { 1 }
-            $dist[$i, $j] = [Math]::Min(
-                [Math]::Min($dist[$i - 1, $j] + 1, $dist[$i, $j - 1] + 1),
-                $dist[$i - 1, $j - 1] + $cost
-            )
+            $above = $dist[$i - 1, $j] + 1
+            $left = $dist[$i, $j - 1] + 1
+            $diag = $dist[$i - 1, $j - 1] + $cost
+            $dist[$i, $j] = [Math]::Min([Math]::Min($above, $left), $diag)
         }
     }
 
@@ -187,6 +187,137 @@ function Values-Differ($left, $right) {
     $leftText = if ($left -is [datetime]) { $left.ToString('MM/dd/yyyy') } else { (Trim-DbString $left) }
     $rightText = if ($right -is [datetime]) { $right.ToString('MM/dd/yyyy') } else { (Trim-DbString $right) }
     $leftText -ne $rightText
+}
+
+function Get-TableColumnSet($odbcConn, [string]$tableName) {
+    $schema = $odbcConn.GetSchema('Columns')
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $schema.Rows) {
+        if ("$($row['TABLE_NAME'])" -ieq $tableName) {
+            [void]$set.Add("$($row['COLUMN_NAME'])")
+        }
+    }
+    $set
+}
+
+function Get-ExistingColumnName($columnSet, [string[]]$candidates) {
+    foreach ($candidate in $candidates) {
+        if ($columnSet.Contains($candidate)) { return $candidate }
+    }
+    $null
+}
+
+function Get-DataValue($row, [string[]]$candidates) {
+    foreach ($candidate in $candidates) {
+        if ($row.Table.Columns.Contains($candidate)) {
+            $value = $row[$candidate]
+            if ($value -is [System.DBNull]) { return $null }
+            return $value
+        }
+    }
+    $null
+}
+
+function Get-PatientFieldText($row, [string[]]$candidates) {
+    Trim-DbString (Get-DataValue $row $candidates)
+}
+
+function Format-PatientDate($value) {
+    if ($null -eq $value -or $value -is [System.DBNull]) { return '' }
+    try { return ([datetime]$value).ToString('MM/dd/yyyy') } catch { return (Trim-DbString $value) }
+}
+
+function Convert-RelationCodeToText($value) {
+    if ($null -eq $value -or $value -is [System.DBNull] -or [string]::IsNullOrWhiteSpace("$value")) { return 'Self' }
+    switch ([int]$value) {
+        0 { 'Self' }
+        1 { 'Spouse' }
+        2 { 'Child' }
+        3 { 'Other' }
+        default { 'Other' }
+    }
+}
+
+function Convert-TextToRelationCode([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return 0 }
+    switch -Regex ($value.Trim().ToLowerInvariant()) {
+        '^self$' { 0 }
+        '^spouse$' { 1 }
+        '^child$' { 2 }
+        default { 3 }
+    }
+}
+
+function New-PatientApiModel($row) {
+    [pscustomobject]@{
+        chartNumber = Get-PatientFieldText $row @('Chart Number')
+        firstName = Get-PatientFieldText $row @('First Name')
+        middleInitial = Get-PatientFieldText $row @('Middle Initial', 'Middle Name', 'MI')
+        lastName = Get-PatientFieldText $row @('Last Name')
+        birthDate = Format-PatientDate (Get-DataValue $row @('Birth Date'))
+        gender = Get-PatientFieldText $row @('Gender', 'Sex')
+        ssn = Get-PatientFieldText $row @('SSN', 'SIN/SSN', 'SIN')
+        homePhone = Get-PatientFieldText $row @('Home Phone', 'Phone(Home/Work)')
+        mobile = Get-PatientFieldText $row @('Mobile', 'Mobile Phone', 'Mobile(Home/Work)')
+        workPhone = Get-PatientFieldText $row @('Work Phone')
+        street = Get-PatientFieldText $row @('Street', 'Address 1')
+        apt = Get-PatientFieldText $row @('Street 2', 'Address 2')
+        city = Get-PatientFieldText $row @('City')
+        state = Get-PatientFieldText $row @('State')
+        zip = Get-PatientFieldText $row @('Zip', 'Postal Code')
+        maritalStatus = Get-PatientFieldText $row @('Marital Status')
+        email = Get-PatientFieldText $row @('E-mail', 'Email(Home)', 'Email')
+        emergencyContact = Get-PatientFieldText $row @('Emergency Contact')
+        emergencyPhone = Get-PatientFieldText $row @('Emergency Phone')
+        referral = Get-PatientFieldText $row @('Referred By', 'Referral')
+        relationship = Convert-RelationCodeToText (Get-DataValue $row @('Relation to Subscriber 1'))
+    }
+}
+
+function Get-BirthDatePenalty($inputDate, $rowBirthDate) {
+    if ($null -eq $inputDate -or $null -eq $rowBirthDate -or $rowBirthDate -is [System.DBNull]) { return 8 }
+    try {
+        $candidateDate = ([datetime]$rowBirthDate).Date
+        $diff = [math]::Abs(($candidateDate - $inputDate.Date).TotalDays)
+        if ($diff -eq 0) { return 0 }
+        if ($diff -le 1) { return 1 }
+        if ($diff -le 3) { return 3 }
+        if ($diff -le 7) { return 6 }
+        return 20
+    } catch {
+        return 20
+    }
+}
+
+function Get-PatientMatchScore($row, [string]$firstName, [string]$lastName, $birthDate) {
+    $candidateFirst = Normalize-Name (Get-PatientFieldText $row @('First Name'))
+    $candidateLast = Normalize-Name (Get-PatientFieldText $row @('Last Name'))
+    if ([string]::IsNullOrWhiteSpace($candidateFirst) -or [string]::IsNullOrWhiteSpace($candidateLast)) {
+        return [int]::MaxValue
+    }
+
+    $firstDistance = Get-LevenshteinDistance (Normalize-Name $firstName) $candidateFirst
+    $lastDistance = Get-LevenshteinDistance (Normalize-Name $lastName) $candidateLast
+    $birthPenalty = Get-BirthDatePenalty $birthDate (Get-DataValue $row @('Birth Date'))
+
+    if ($firstDistance -gt 2 -or $lastDistance -gt 2) {
+        return [int]::MaxValue
+    }
+
+    if ($birthPenalty -ge 20) {
+        return [int]::MaxValue
+    }
+
+    ($lastDistance * 5) + ($firstDistance * 3) + $birthPenalty
+}
+
+function Add-UpdateParameter($cmd, [string]$columnName, $value, [System.Data.Odbc.OdbcType]$type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0) {
+    $parameter = $cmd.CreateParameter()
+    $parameter.OdbcType = $type
+    if ($size -gt 0) { $parameter.Size = $size }
+    $parameter.Value = To-DbNull $value
+    [void]$cmd.Parameters.Add($parameter)
+    '"{0}" = ?' -f $columnName
 }
 
 function Save-PdfDocuments($odbcConn, [string]$chartNumber, $pdfs, [bool]$skipDuplicates) {
@@ -267,6 +398,175 @@ function Save-PdfDocuments($odbcConn, [string]$chartNumber, $pdfs, [bool]$skipDu
     @{
         inserted = $inserted
         skipped = $skipped
+    }
+}
+
+function Handle-ApiPatientSearch($request, $response) {
+    $odbcConn = $null
+    $nagJob = $null
+    try {
+        $payload = Read-JsonBody $request
+        $firstName = Trim-DbString $payload.firstName
+        $lastName = Trim-DbString $payload.lastName
+        $birthDate = Parse-NullableDate $payload.birthDate
+
+        if ([string]::IsNullOrWhiteSpace($firstName) -or [string]::IsNullOrWhiteSpace($lastName) -or $null -eq $birthDate) {
+            Write-JsonResponse $response 400 @{ error = 'First name, last name, and birthdate are required.' }
+            return
+        }
+
+        $nagJob = Start-NagSuppressorJob
+        $odbcConn = Open-DentiMaxConnection
+        $cmd = $odbcConn.CreateCommand()
+        $cmd.CommandText = 'SELECT * FROM patient WHERE "First Name" LIKE ? AND "Last Name" LIKE ?'
+        $firstParam = $cmd.CreateParameter()
+        $firstParam.Value = "$firstName%"
+        [void]$cmd.Parameters.Add($firstParam)
+        $lastParam = $cmd.CreateParameter()
+        $lastParam.Value = "$lastName%"
+        [void]$cmd.Parameters.Add($lastParam)
+
+        $reader = $cmd.ExecuteReader()
+        $table = New-Object System.Data.DataTable
+        $table.Load($reader)
+
+        $ranked = @(foreach ($row in $table.Rows) {
+            $score = Get-PatientMatchScore $row $firstName $lastName $birthDate
+            if ($score -eq [int]::MaxValue) { continue }
+            [pscustomobject]@{
+                score = $score
+                patient = New-PatientApiModel $row
+            }
+        })
+
+        $bestMatches = @($ranked | Sort-Object score)
+        if ($bestMatches.Count -eq 0) {
+            Write-JsonResponse $response 200 @{ matches = @() }
+            return
+        }
+
+        $winner = $bestMatches[0]
+        $runnerUp = if ($bestMatches.Count -gt 1) { $bestMatches[1] } else { $null }
+        $isConfident = $winner.score -le 8 -and ($null -eq $runnerUp -or ($runnerUp.score - $winner.score) -ge 2)
+
+        $matches = if ($isConfident) { @($winner.patient) } else { @() }
+        Write-JsonResponse $response 200 @{ matches = $matches }
+    } catch {
+        Write-JsonResponse $response 500 @{ error = $_.Exception.Message }
+    } finally {
+        if ($odbcConn -and $odbcConn.State -eq 'Open') { $odbcConn.Close() }
+        if ($nagJob) {
+            Stop-Job -Id $nagJob.Id -ErrorAction SilentlyContinue
+            Remove-Job -Id $nagJob.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Handle-ApiCheckIn($request, $response) {
+    $odbcConn = $null
+    $nagJob = $null
+    try {
+        $nagJob = Start-NagSuppressorJob
+        $payload = Read-JsonBody $request
+        $chartNumber = Convert-ToChartString (Trim-DbString $payload.chartNumber)
+        if ([string]::IsNullOrWhiteSpace($chartNumber)) {
+            Write-JsonResponse $response 400 @{ error = 'Chart number is required for returning-patient check-in.' }
+            return
+        }
+
+        $odbcConn = Open-DentiMaxConnection
+        $patientColumns = Get-TableColumnSet $odbcConn 'patient'
+        $editedStepIds = @()
+        if ($null -ne $payload.editedStepIds) {
+            $editedStepIds = @($payload.editedStepIds | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        }
+
+        $updatedColumns = @()
+        if ($editedStepIds -contains 'registration') {
+            $updateCmd = $odbcConn.CreateCommand()
+            $assignments = New-Object 'System.Collections.Generic.List[string]'
+
+            $fieldMap = @(
+                @{ candidates = @('First Name'); value = $payload.firstName },
+                @{ candidates = @('Middle Initial', 'Middle Name', 'MI'); value = $payload.middleInitial },
+                @{ candidates = @('Last Name'); value = $payload.lastName },
+                @{ candidates = @('Birth Date'); value = (Parse-NullableDate $payload.birthDate); type = [System.Data.Odbc.OdbcType]::DateTime },
+                @{ candidates = @('Gender', 'Sex'); value = $payload.gender },
+                @{ candidates = @('SSN', 'SIN/SSN', 'SIN'); value = $payload.ssn },
+                @{ candidates = @('Home Phone', 'Phone(Home/Work)'); value = $payload.homePhone },
+                @{ candidates = @('Mobile', 'Mobile Phone', 'Mobile(Home/Work)'); value = $payload.mobile },
+                @{ candidates = @('Work Phone'); value = $payload.workPhone },
+                @{ candidates = @('Street', 'Address 1'); value = $payload.street },
+                @{ candidates = @('Street 2', 'Address 2'); value = $payload.apt },
+                @{ candidates = @('City'); value = $payload.city },
+                @{ candidates = @('State'); value = $payload.state },
+                @{ candidates = @('Zip', 'Postal Code'); value = $payload.zip },
+                @{ candidates = @('Marital Status'); value = $payload.maritalStatus },
+                @{ candidates = @('E-mail', 'Email(Home)', 'Email'); value = $payload.email },
+                @{ candidates = @('Emergency Contact'); value = $payload.emergencyContact },
+                @{ candidates = @('Emergency Phone'); value = $payload.emergencyPhone },
+                @{ candidates = @('Referred By', 'Referral'); value = $payload.referral }
+            )
+
+            foreach ($field in $fieldMap) {
+                $columnName = Get-ExistingColumnName $patientColumns $field.candidates
+                if ($null -eq $columnName) { continue }
+                $type = if ($field.ContainsKey('type')) { $field.type } else { [System.Data.Odbc.OdbcType]::VarChar }
+                [void]$assignments.Add((Add-UpdateParameter $updateCmd $columnName $field.value $type))
+                $updatedColumns += $columnName
+            }
+
+            $headOfHouseholdColumn = Get-ExistingColumnName $patientColumns @('Head of Household')
+            if ($headOfHouseholdColumn) {
+                [void]$assignments.Add((Add-UpdateParameter $updateCmd $headOfHouseholdColumn $chartNumber [System.Data.Odbc.OdbcType]::Char 10))
+                $updatedColumns += $headOfHouseholdColumn
+            }
+
+            $subscriberColumn = Get-ExistingColumnName $patientColumns @('Subscriber 1')
+            if ($subscriberColumn) {
+                [void]$assignments.Add((Add-UpdateParameter $updateCmd $subscriberColumn $chartNumber [System.Data.Odbc.OdbcType]::Char 10))
+                $updatedColumns += $subscriberColumn
+            }
+
+            $relationColumn = Get-ExistingColumnName $patientColumns @('Relation to Subscriber 1')
+            if ($relationColumn) {
+                [void]$assignments.Add((Add-UpdateParameter $updateCmd $relationColumn (Convert-TextToRelationCode $payload.relationship) [System.Data.Odbc.OdbcType]::Int))
+                $updatedColumns += $relationColumn
+            }
+
+            $modifiedColumn = Get-ExistingColumnName $patientColumns @('Date Modified')
+            if ($modifiedColumn) {
+                [void]$assignments.Add((Add-UpdateParameter $updateCmd $modifiedColumn ([datetime]::Now) [System.Data.Odbc.OdbcType]::DateTime))
+                $updatedColumns += $modifiedColumn
+            }
+
+            if ($assignments.Count -gt 0) {
+                $updateCmd.CommandText = 'UPDATE patient SET {0} WHERE "Chart Number" = ?' -f ($assignments -join ', ')
+                $chartParam = $updateCmd.CreateParameter()
+                $chartParam.OdbcType = [System.Data.Odbc.OdbcType]::Char
+                $chartParam.Size = 10
+                $chartParam.Value = $chartNumber
+                [void]$updateCmd.Parameters.Add($chartParam)
+                [void]$updateCmd.ExecuteNonQuery()
+            }
+        }
+
+        $pdfResult = Save-PdfDocuments $odbcConn $chartNumber $payload.pdfs $true
+        Write-JsonResponse $response 200 @{
+            success = $true
+            chartNumber = $chartNumber.Trim()
+            updatedColumns = @($updatedColumns | Sort-Object -Unique)
+            editedStepIds = $editedStepIds
+            documents = $pdfResult
+        }
+    } catch {
+        Write-JsonResponse $response 500 @{ error = $_.Exception.Message }
+    } finally {
+        if ($odbcConn -and $odbcConn.State -eq 'Open') { $odbcConn.Close() }
+        if ($nagJob) {
+            Stop-Job -Id $nagJob.Id -ErrorAction SilentlyContinue
+            Remove-Job -Id $nagJob.Id -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -513,6 +813,10 @@ try {
                 Stop-Job -Id $nagJob.Id -ErrorAction SilentlyContinue
                 Remove-Job -Id $nagJob.Id -Force -ErrorAction SilentlyContinue
             }
+        } elseif ($req.Url.AbsolutePath -eq "/api/patient-search" -and ($req.HttpMethod -eq "POST")) {
+            Handle-ApiPatientSearch $req $res
+        } elseif ($req.Url.AbsolutePath -eq "/api/checkin" -and ($req.HttpMethod -eq "POST")) {
+            Handle-ApiCheckIn $req $res
         } else {
             Serve-Static $req $res
         }
