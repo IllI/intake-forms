@@ -370,7 +370,7 @@ function Save-PdfDocuments($odbcConn, [string]$chartNumber, $pdfs, [bool]$skipDu
         $insertDocCmd.CommandText = 'INSERT INTO dcdocument ("ID", "Date", "Type", "Date Created", "Date Modified", "Chart Number", "Name", "Doc Type") VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         $now = [datetime]::Now
 
-        $pId = $insertDocCmd.CreateParameter(); $pId.OdbcType = [System.Data.Odbc.OdbcType]::Int; $pId.Value = $newDocId; [void]$insertDocCmd.Parameters.Add($pId)
+        $docIdParam = $insertDocCmd.CreateParameter(); $docIdParam.OdbcType = [System.Data.Odbc.OdbcType]::Int; $docIdParam.Value = $newDocId; [void]$insertDocCmd.Parameters.Add($docIdParam)
         $pDate = $insertDocCmd.CreateParameter(); $pDate.Value = $now; [void]$insertDocCmd.Parameters.Add($pDate)
         $pType = $insertDocCmd.CreateParameter(); $pType.OdbcType = [System.Data.Odbc.OdbcType]::Int; $pType.Value = $docCategory; [void]$insertDocCmd.Parameters.Add($pType)
         $pCreated = $insertDocCmd.CreateParameter(); $pCreated.Value = $now; [void]$insertDocCmd.Parameters.Add($pCreated)
@@ -449,8 +449,8 @@ function Handle-ApiPatientSearch($request, $response) {
         $runnerUp = if ($bestMatches.Count -gt 1) { $bestMatches[1] } else { $null }
         $isConfident = $winner.score -le 8 -and ($null -eq $runnerUp -or ($runnerUp.score - $winner.score) -ge 2)
 
-        $matches = if ($isConfident) { @($winner.patient) } else { @() }
-        Write-JsonResponse $response 200 @{ matches = $matches }
+        $patientMatches = if ($isConfident) { @($winner.patient) } else { @() }
+        Write-JsonResponse $response 200 @{ matches = $patientMatches }
     } catch {
         Write-JsonResponse $response 500 @{ error = $_.Exception.Message }
     } finally {
@@ -684,7 +684,7 @@ function Handle-ApiRegister($request, $response, $suppressorJob) {
                 
                 $now = [datetime]::Now
                 
-                $paramId = $insertDocCmd.CreateParameter(); $paramId.OdbcType = [System.Data.Odbc.OdbcType]::Int; $paramId.Value = $newDocId; [void]$insertDocCmd.Parameters.Add($paramId)
+                $docInsertIdParam = $insertDocCmd.CreateParameter(); $docInsertIdParam.OdbcType = [System.Data.Odbc.OdbcType]::Int; $docInsertIdParam.Value = $newDocId; [void]$insertDocCmd.Parameters.Add($docInsertIdParam)
                 $pDate = $insertDocCmd.CreateParameter(); $pDate.Value = $now; [void]$insertDocCmd.Parameters.Add($pDate)
                 $pType = $insertDocCmd.CreateParameter(); $pType.OdbcType = [System.Data.Odbc.OdbcType]::Int; $pType.Value = $docCategory; [void]$insertDocCmd.Parameters.Add($pType)
                 $pCreated = $insertDocCmd.CreateParameter(); $pCreated.Value = $now; [void]$insertDocCmd.Parameters.Add($pCreated)
