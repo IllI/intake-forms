@@ -194,6 +194,57 @@ button { padding: 0.8rem 1.8rem; border-radius: 25px; border: none; font-weight:
 .generating-pdf .card.glass { background: white; box-shadow: none; border: none; padding: 0; }
 .generating-pdf .container { max-width: 8.5in; }
 .generating-pdf .fade-in { animation: none; transform: none; opacity: 1; }
+.pdf-export-shell {
+    position: fixed;
+    left: -200vw;
+    top: 0;
+    width: 8.1in;
+    padding: 0.2in;
+    background: #fff;
+    color: var(--text);
+    z-index: -1;
+}
+.pdf-export-header {
+    text-align: center;
+    margin-bottom: 0.35in;
+}
+.pdf-export-header .practice-logo {
+    max-height: 0.8in;
+    margin-bottom: 0.08in;
+}
+.pdf-export-header .practice-info {
+    margin-bottom: 0.15in;
+    color: var(--text-muted);
+}
+.pdf-export-header h1 {
+    font-size: 1.3rem;
+    margin-bottom: 0.08in;
+}
+.pdf-export-header p {
+    margin: 0;
+}
+.pdf-export-content {
+    width: 100%;
+}
+.pdf-export-content > section {
+    display: block !important;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    break-inside: avoid;
+}
+.pdf-export-content .card,
+.pdf-export-content .inner-glass,
+.pdf-export-content .glass {
+    background: #fff;
+    box-shadow: none;
+    border: none;
+}
+.pdf-export-content .wizard-progress,
+.pdf-export-content .header,
+.pdf-export-content .actions {
+    display: none !important;
+}
 
 /* Success Overlay */
 .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 100; display: flex; align-items: center; justify-content: center; }

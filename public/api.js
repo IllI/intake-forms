@@ -36,9 +36,12 @@ window.SYGApi = (() => {
 
         const payloadMatches = result.matches || [];
         if (Array.isArray(payloadMatches)) {
-            return payloadMatches;
+            return payloadMatches.filter(match => match && typeof match === 'object' && `${match.chartNumber || ''}`.trim());
         }
-        return payloadMatches ? [payloadMatches] : [];
+        if (payloadMatches && typeof payloadMatches === 'object' && `${payloadMatches.chartNumber || ''}`.trim()) {
+            return [payloadMatches];
+        }
+        return [];
     }
 
     async function createIntake(payload) {

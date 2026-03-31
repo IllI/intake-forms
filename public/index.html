@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
 
     <!-- Styles -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260331c">
 
     <!-- Dependencies -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -84,9 +84,7 @@
 
                 <div v-if="lookupMatches.length" class="match-list">
                     <button v-for="match in lookupMatches" :key="match.chartNumber" class="match-card" @click="chooseReturningPatient(match)">
-                        <span class="match-name">{{ match.firstName }} {{ match.lastName }}</span>
-                        <span class="match-meta">DOB {{ match.birthDate }}</span>
-                        <span class="match-meta" v-if="match.mobile">Mobile {{ match.mobile }}</span>
+                        <span class="match-name">{{ getPatientDisplayLabel(match) }}</span>
                     </button>
                 </div>
             </div>
@@ -142,7 +140,7 @@
             <div class="form-content card glass">
 
                 <!-- Step 1: Patient Registration -->
-                <section v-show="steps[currentStep - 1]?.id === 'registration'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'registration'" class="fade-in" data-step-id="registration">
                     <h2 class="section-title">Patient Registration</h2>
                     <div class="form-grid">
                         <div class="input-group" style="grid-column: 1 / -1;">
@@ -241,7 +239,7 @@
                 </section>
 
                 <!-- Step 2: Medical History -->
-                <section v-show="steps[currentStep - 1]?.id === 'history'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'history'" class="fade-in" data-step-id="history">
                     <h2 class="section-title">Medical History</h2>
                     <div class="card inner-glass"
                         style="margin-bottom: 1.5rem; padding: 1.5rem; font-size: 0.95rem; line-height: 1.6;">
@@ -374,7 +372,7 @@
                 </section>
 
                 <!-- Step 3: Medical Conditions -->
-                <section v-show="steps[currentStep - 1]?.id === 'conditions'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'conditions'" class="fade-in" data-step-id="conditions">
                     <h2 class="section-title">Medical Conditions</h2>
                     <p class="instruction-text">Tap all that apply to your medical history.</p>
 
@@ -430,7 +428,7 @@
                 </section>
 
                 <!-- Step: Smile Makeover Questionnaire -->
-                <section v-show="steps[currentStep - 1]?.id === 'smile'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'smile'" class="fade-in" data-step-id="smile">
                     <h2 class="section-title">Smile Makeover Questionnaire</h2>
                     <div class="card inner-glass" style="padding: 1.5rem; margin-bottom: 2rem;">
                         <p class="instruction-text"
@@ -534,7 +532,7 @@
                 </section>
 
                 <!-- Step 4: Dental Treatment Consent -->
-                <section v-show="steps[currentStep - 1]?.id === 'consent'" class="fade-in consent-form-container">
+                <section v-show="steps[currentStep - 1]?.id === 'consent'" class="fade-in consent-form-container" data-step-id="consent">
                     <div class="consent-header consent-sheet">
                         <h2 class="form-main-title">DENTAL TREATMENT CONSENT FORM</h2>
                         <div class="patient-header-info">
@@ -708,7 +706,7 @@
                 </section>
 
                 <!-- Step: Cancellation Policy -->
-                <section v-show="steps[currentStep - 1]?.id === 'cancellation'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'cancellation'" class="fade-in" data-step-id="cancellation">
                     <h2 class="section-title">Cancellation Policy</h2>
                     <div class="legal-scroll-box card inner-glass"
                         style="padding: 1.5rem; font-size: 0.95rem; line-height: 1.6;">
@@ -765,7 +763,7 @@
                 </section>
 
                 <!-- Step: HIPAA Privacy -->
-                <section v-show="steps[currentStep - 1]?.id === 'hipaa'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'hipaa'" class="fade-in" data-step-id="hipaa">
                     <h2 class="section-title">Notice of Privacy Practices</h2>
                     <div class="legal-scroll-box card inner-glass"
                         style="padding: 1.5rem; font-size: 0.95rem; line-height: 1.6;">
@@ -833,7 +831,7 @@
                 </section>
 
                 <!-- Step 5: Signature -->
-                <section v-show="steps[currentStep - 1]?.id === 'signature'" class="fade-in">
+                <section v-show="steps[currentStep - 1]?.id === 'signature'" class="fade-in" data-step-id="signature">
                     <h2 class="section-title">Final Signature</h2>
                     <div class="signature-layout">
                         <div class="signature-box-item">
@@ -902,9 +900,9 @@
         </div>
     </div>
 
-    <script src="models.js"></script>
-    <script src="api.js"></script>
-    <script src="app.js"></script>
+    <script src="models.js?v=20260331c"></script>
+    <script src="api.js?v=20260331c"></script>
+    <script src="app.js?v=20260331c"></script>
 </body>
 
 </html>

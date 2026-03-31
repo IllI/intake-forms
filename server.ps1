@@ -131,7 +131,7 @@ function Trim-DbString($value) {
 
 function Normalize-Name([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) { return '' }
-    (($value.ToLowerInvariant()) -replace '[^a-z]', '')
+    (($value.ToLowerInvariant()) -replace '[^a-z0-9]', '')
 }
 
 function Get-LevenshteinDistance([string]$source, [string]$target) {
@@ -290,17 +290,22 @@ function Get-BirthDatePenalty($inputDate, $rowBirthDate) {
 }
 
 function Get-PatientMatchScore($row, [string]$firstName, [string]$lastName, $birthDate) {
+    $normalizedFirst = Normalize-Name $firstName
+    $normalizedLast = Normalize-Name $lastName
     $candidateFirst = Normalize-Name (Get-PatientFieldText $row @('First Name'))
     $candidateLast = Normalize-Name (Get-PatientFieldText $row @('Last Name'))
     if ([string]::IsNullOrWhiteSpace($candidateFirst) -or [string]::IsNullOrWhiteSpace($candidateLast)) {
         return [int]::MaxValue
     }
 
-    $firstDistance = Get-LevenshteinDistance (Normalize-Name $firstName) $candidateFirst
-    $lastDistance = Get-LevenshteinDistance (Normalize-Name $lastName) $candidateLast
+    $firstDistance = Get-LevenshteinDistance $normalizedFirst $candidateFirst
+    $lastDistance = Get-LevenshteinDistance $normalizedLast $candidateLast
     $birthPenalty = Get-BirthDatePenalty $birthDate (Get-DataValue $row @('Birth Date'))
 
-    if ($firstDistance -gt 2 -or $lastDistance -gt 2) {
+    $maxFirstDistance = if ($normalizedFirst.Length -le 4) { 1 } else { 2 }
+    $maxLastDistance = if ($normalizedLast.Length -le 4) { 1 } else { 2 }
+
+    if ($firstDistance -gt $maxFirstDistance -or $lastDistance -gt $maxLastDistance) {
         return [int]::MaxValue
     }
 
@@ -309,6 +314,54 @@ function Get-PatientMatchScore($row, [string]$firstName, [string]$lastName, $bir
     }
 
     ($lastDistance * 5) + ($firstDistance * 3) + $birthPenalty
+}
+
+function Find-ExactPatientMatches($odbcConn, [string]$firstName, [string]$lastName, $birthDate) {
+    if ([string]::IsNullOrWhiteSpace($firstName) -or [string]::IsNullOrWhiteSpace($lastName) -or $null -eq $birthDate) {
+        return @()
+    }
+
+    $cmd = $odbcConn.CreateCommand()
+    $cmd.CommandText = 'SELECT * FROM patient WHERE "Birth Date" = ? AND "First Name" = ? AND "Last Name" = ?'
+
+    $birthParam = $cmd.CreateParameter()
+    $birthParam.OdbcType = [System.Data.Odbc.OdbcType]::DateTime
+    $birthParam.Value = $birthDate.Date
+    [void]$cmd.Parameters.Add($birthParam)
+
+    $firstParam = $cmd.CreateParameter()
+    $firstParam.Value = $firstName
+    [void]$cmd.Parameters.Add($firstParam)
+
+    $lastParam = $cmd.CreateParameter()
+    $lastParam.Value = $lastName
+    [void]$cmd.Parameters.Add($lastParam)
+
+    $table = New-Object System.Data.DataTable
+    $table.Load($cmd.ExecuteReader())
+    @(
+        foreach ($row in $table.Rows) {
+            $row
+        }
+    )
+}
+
+function Find-NormalizedPatientMatches($rows, [string]$firstName, [string]$lastName) {
+    $normalizedFirst = Normalize-Name $firstName
+    $normalizedLast = Normalize-Name $lastName
+    if ([string]::IsNullOrWhiteSpace($normalizedFirst) -or [string]::IsNullOrWhiteSpace($normalizedLast)) {
+        return @()
+    }
+
+    @(
+        foreach ($row in $rows) {
+            $candidateFirst = Normalize-Name (Get-PatientFieldText $row @('First Name'))
+            $candidateLast = Normalize-Name (Get-PatientFieldText $row @('Last Name'))
+            if ($candidateFirst -eq $normalizedFirst -and $candidateLast -eq $normalizedLast) {
+                $row
+            }
+        }
+    )
 }
 
 function Add-UpdateParameter($cmd, [string]$columnName, $value, [System.Data.Odbc.OdbcType]$type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0) {
@@ -417,18 +470,42 @@ function Handle-ApiPatientSearch($request, $response) {
 
         $nagJob = Start-NagSuppressorJob
         $odbcConn = Open-DentiMaxConnection
+        $exactCmd = $odbcConn.CreateCommand()
+        $exactCmd.CommandText = 'SELECT * FROM patient WHERE "Birth Date" = ? AND "First Name" = ? AND "Last Name" = ?'
+        $exactBirthParam = $exactCmd.CreateParameter()
+        $exactBirthParam.OdbcType = [System.Data.Odbc.OdbcType]::DateTime
+        $exactBirthParam.Value = $birthDate.Date
+        [void]$exactCmd.Parameters.Add($exactBirthParam)
+        $exactFirstParam = $exactCmd.CreateParameter()
+        $exactFirstParam.Value = $firstName
+        [void]$exactCmd.Parameters.Add($exactFirstParam)
+        $exactLastParam = $exactCmd.CreateParameter()
+        $exactLastParam.Value = $lastName
+        [void]$exactCmd.Parameters.Add($exactLastParam)
+
+        $exactTable = New-Object System.Data.DataTable
+        $exactTable.Load($exactCmd.ExecuteReader())
+        if ($exactTable.Rows.Count -eq 1) {
+            Write-JsonResponse $response 200 @{ matches = @(New-PatientApiModel ($exactTable.Rows[0])) }
+            return
+        }
+
         $cmd = $odbcConn.CreateCommand()
-        $cmd.CommandText = 'SELECT * FROM patient WHERE "First Name" LIKE ? AND "Last Name" LIKE ?'
-        $firstParam = $cmd.CreateParameter()
-        $firstParam.Value = "$firstName%"
-        [void]$cmd.Parameters.Add($firstParam)
-        $lastParam = $cmd.CreateParameter()
-        $lastParam.Value = "$lastName%"
-        [void]$cmd.Parameters.Add($lastParam)
+        $cmd.CommandText = 'SELECT * FROM patient WHERE "Birth Date" = ?'
+        $birthParam = $cmd.CreateParameter()
+        $birthParam.OdbcType = [System.Data.Odbc.OdbcType]::DateTime
+        $birthParam.Value = $birthDate.Date
+        [void]$cmd.Parameters.Add($birthParam)
 
         $reader = $cmd.ExecuteReader()
         $table = New-Object System.Data.DataTable
         $table.Load($reader)
+
+        $exactRows = @(Find-NormalizedPatientMatches $table.Rows $firstName $lastName)
+        if ($exactRows.Count -eq 1) {
+            Write-JsonResponse $response 200 @{ matches = @(New-PatientApiModel ($exactRows[0])) }
+            return
+        }
 
         $ranked = @(foreach ($row in $table.Rows) {
             $score = Get-PatientMatchScore $row $firstName $lastName $birthDate
@@ -447,7 +524,9 @@ function Handle-ApiPatientSearch($request, $response) {
 
         $winner = $bestMatches[0]
         $runnerUp = if ($bestMatches.Count -gt 1) { $bestMatches[1] } else { $null }
-        $isConfident = $winner.score -le 8 -and ($null -eq $runnerUp -or ($runnerUp.score - $winner.score) -ge 2)
+        $winnerScore = [int](@($winner.score)[0])
+        $runnerUpScore = if ($null -eq $runnerUp) { $null } else { [int](@($runnerUp.score)[0]) }
+        $isConfident = $winnerScore -le 8 -and ($null -eq $runnerUpScore -or $winnerScore -lt $runnerUpScore)
 
         $patientMatches = if ($isConfident) { @($winner.patient) } else { @() }
         Write-JsonResponse $response 200 @{ matches = $patientMatches }
@@ -469,12 +548,80 @@ function Handle-ApiCheckIn($request, $response) {
         $nagJob = Start-NagSuppressorJob
         $payload = Read-JsonBody $request
         $chartNumber = Convert-ToChartString (Trim-DbString $payload.chartNumber)
+        $odbcConn = Open-DentiMaxConnection
+        if ([string]::IsNullOrWhiteSpace($chartNumber)) {
+            $firstName = Trim-DbString $payload.firstName
+            $lastName = Trim-DbString $payload.lastName
+            $birthDate = Parse-NullableDate $payload.birthDate
+
+            if (-not [string]::IsNullOrWhiteSpace($firstName) -and -not [string]::IsNullOrWhiteSpace($lastName) -and $null -ne $birthDate) {
+                $exactCmd = $odbcConn.CreateCommand()
+                $exactCmd.CommandText = 'SELECT * FROM patient WHERE "Birth Date" = ? AND "First Name" = ? AND "Last Name" = ?'
+                $exactBirthParam = $exactCmd.CreateParameter()
+                $exactBirthParam.OdbcType = [System.Data.Odbc.OdbcType]::DateTime
+                $exactBirthParam.Value = $birthDate.Date
+                [void]$exactCmd.Parameters.Add($exactBirthParam)
+                $exactFirstParam = $exactCmd.CreateParameter()
+                $exactFirstParam.Value = $firstName
+                [void]$exactCmd.Parameters.Add($exactFirstParam)
+                $exactLastParam = $exactCmd.CreateParameter()
+                $exactLastParam.Value = $lastName
+                [void]$exactCmd.Parameters.Add($exactLastParam)
+
+                $exactTable = New-Object System.Data.DataTable
+                $exactTable.Load($exactCmd.ExecuteReader())
+                if ($exactTable.Rows.Count -eq 1) {
+                    $chartNumber = Convert-ToChartString (Get-PatientFieldText ($exactTable.Rows[0]) @('Chart Number'))
+                }
+
+                if ([string]::IsNullOrWhiteSpace($chartNumber)) {
+                $findCmd = $odbcConn.CreateCommand()
+                $findCmd.CommandText = 'SELECT * FROM patient WHERE "Birth Date" = ?'
+                $birthParam = $findCmd.CreateParameter()
+                $birthParam.OdbcType = [System.Data.Odbc.OdbcType]::DateTime
+                $birthParam.Value = $birthDate.Date
+                [void]$findCmd.Parameters.Add($birthParam)
+
+                $reader = $findCmd.ExecuteReader()
+                $table = New-Object System.Data.DataTable
+                $table.Load($reader)
+
+                $exactRows = @(Find-NormalizedPatientMatches $table.Rows $firstName $lastName)
+                if ($exactRows.Count -eq 1) {
+                    $chartNumber = Convert-ToChartString (Get-PatientFieldText ($exactRows[0]) @('Chart Number'))
+                }
+
+                if ([string]::IsNullOrWhiteSpace($chartNumber)) {
+                $ranked = @(foreach ($row in $table.Rows) {
+                    $score = Get-PatientMatchScore $row $firstName $lastName $birthDate
+                    if ($score -eq [int]::MaxValue) { continue }
+                    [pscustomobject]@{
+                        score = $score
+                        chartNumber = Convert-ToChartString (Get-PatientFieldText $row @('Chart Number'))
+                    }
+                })
+                $ranked = @($ranked | Sort-Object score)
+
+                if ($ranked.Count -gt 0) {
+                    $winner = $ranked[0]
+                    $runnerUp = if ($ranked.Count -gt 1) { $ranked[1] } else { $null }
+                    $winnerScore = [int](@($winner.score)[0])
+                    $runnerUpScore = if ($null -eq $runnerUp) { $null } else { [int](@($runnerUp.score)[0]) }
+                    $isConfident = $winnerScore -le 8 -and ($null -eq $runnerUpScore -or $winnerScore -lt $runnerUpScore)
+                    if ($isConfident -and -not [string]::IsNullOrWhiteSpace($winner.chartNumber)) {
+                        $chartNumber = $winner.chartNumber
+                    }
+                }
+                }
+                }
+            }
+        }
+
         if ([string]::IsNullOrWhiteSpace($chartNumber)) {
             Write-JsonResponse $response 400 @{ error = 'Chart number is required for returning-patient check-in.' }
             return
         }
 
-        $odbcConn = Open-DentiMaxConnection
         $patientColumns = Get-TableColumnSet $odbcConn 'patient'
         $editedStepIds = @()
         if ($null -ne $payload.editedStepIds) {

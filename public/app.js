@@ -12,6 +12,7 @@ createApp({
         const lookupError = ref('');
         const lookupMatches = ref([]);
         const selectedPatient = ref(null);
+        const selectedChartNumber = ref('');
         const selectedStepIds = ref([]);
         const hasEdited = ref(false);
         const suppressDirtyTracking = ref(false);
@@ -42,7 +43,27 @@ createApp({
             : "Welcome to Smile You're Golden. Please hand the iPad back to the front desk.");
         const successButtonLabel = computed(() => isReturningMode.value ? 'New Session' : 'New Patient Intake');
         const currentDate = computed(() => SYGModels.todayString());
-        const patientDisplayName = computed(() => selectedPatient.value ? `${selectedPatient.value.firstName} ${selectedPatient.value.lastName}`.trim() : '');
+        const patientDisplayName = computed(() => selectedPatient.value ? getPatientDisplayLabel(selectedPatient.value) : '');
+
+        function toDisplayCase(value) {
+            return (value || '')
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+                .join(' ');
+        }
+
+        function getPatientDisplayLabel(patient) {
+            if (!patient) return '';
+            const explicit = `${patient.firstName || ''} ${patient.lastName || ''}`.replace(/\s+/g, ' ').trim();
+            if (explicit) return explicit;
+            if (patient.displayName) return patient.displayName;
+            const typed = `${lookupForm.value.firstName || ''} ${lookupForm.value.lastName || ''}`.replace(/\s+/g, ' ').trim();
+            if (typed) return toDisplayCase(typed);
+            if (patient.chartNumber) return `Patient ${patient.chartNumber}`;
+            return 'Patient Match';
+        }
 
         function patientFullName() {
             return `${form.value.firstName} ${form.value.middleInitial ? form.value.middleInitial + '. ' : ''}${form.value.lastName}`.replace(/\s+/g, ' ').trim();
@@ -70,6 +91,76 @@ createApp({
             form.value.mobile = phoneMask(form.value.mobile);
             form.value.workPhone = phoneMask(form.value.workPhone);
             form.value.emergencyPhone = phoneMask(form.value.emergencyPhone);
+        }
+
+        function maskDateValue(value) {
+            const digits = (value || '').replace(/\D/g, '').slice(0, 8);
+            if (digits.length <= 2) return digits;
+            if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+            return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+        }
+
+        function parseStrictDate(value) {
+            const masked = maskDateValue(value);
+            const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(masked);
+            if (!match) return undefined;
+
+            const month = Number(match[1]);
+            const day = Number(match[2]);
+            const year = Number(match[3]);
+            if (!month || !day || !year || month < 1 || month > 12 || day < 1 || day > 31) {
+                return undefined;
+            }
+
+            const parsed = new Date(year, month - 1, day);
+            if (
+                parsed.getFullYear() !== year ||
+                parsed.getMonth() !== month - 1 ||
+                parsed.getDate() !== day
+            ) {
+                return undefined;
+            }
+
+            return parsed;
+        }
+
+        function formatDateValue(date) {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+            const month = `${date.getMonth() + 1}`.padStart(2, '0');
+            const day = `${date.getDate()}`.padStart(2, '0');
+            const year = `${date.getFullYear()}`;
+            return `${month}/${day}/${year}`;
+        }
+
+        function attachDateInputMask(element) {
+            if (!element || element.dataset.maskedDate === 'true') return;
+
+            element.dataset.maskedDate = 'true';
+            element.setAttribute('inputmode', 'numeric');
+            element.setAttribute('maxlength', '10');
+            element.setAttribute('placeholder', 'MM/DD/YYYY');
+
+            const applyDateMask = () => {
+                const start = element.selectionStart;
+                const masked = maskDateValue(element.value);
+                element.value = masked;
+                if (typeof start === 'number') {
+                    element.setSelectionRange(masked.length, masked.length);
+                }
+            };
+
+            element.addEventListener('input', applyDateMask);
+            element.addEventListener('blur', () => {
+                const parsed = parseStrictDate(element.value);
+                element.value = parsed ? formatDateValue(parsed) : maskDateValue(element.value);
+                if (element._flatpickr) {
+                    if (parsed) {
+                        element._flatpickr.setDate(parsed, false);
+                    } else if (!element.value) {
+                        element._flatpickr.clear();
+                    }
+                }
+            });
         }
 
         function syncDerivedNames() {
@@ -136,7 +227,8 @@ createApp({
                 lookupMatches.value = [];
                 lookupError.value = '';
                 selectedPatient.value = null;
-                selectedStepIds.value = configuredSteps.map(step => step.id);
+                selectedChartNumber.value = '';
+                selectedStepIds.value = [];
                 currentStep.value = 1;
                 steps.value = [...configuredSteps];
                 hasEdited.value = false;
@@ -156,16 +248,21 @@ createApp({
                 if (element._flatpickr) {
                     element._flatpickr.destroy();
                 }
+                attachDateInputMask(element);
             });
 
-            flatpickr('.date-picker-dob', {
+            const pickerOptions = {
                 dateFormat: 'm/d/Y',
-                allowInput: true
-            });
-            flatpickr('.date-picker.signature-date', {
-                dateFormat: 'm/d/Y',
-                allowInput: true
-            });
+                allowInput: true,
+                parseDate: (datestr) => parseStrictDate(datestr),
+                formatDate: (date) => formatDateValue(date),
+                onValueUpdate: (_, dateStr, instance) => {
+                    instance.input.value = maskDateValue(dateStr);
+                }
+            };
+
+            flatpickr('.date-picker-dob', pickerOptions);
+            flatpickr('.date-picker.signature-date', pickerOptions);
         }
 
         function resizeCanvas(canvas, pad) {
@@ -359,8 +456,100 @@ createApp({
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
+        function syncClonedFormState(sourceSection, sectionClone) {
+            const sourceControls = sourceSection.querySelectorAll('input, textarea, select');
+            const cloneControls = sectionClone.querySelectorAll('input, textarea, select');
+            const count = Math.min(sourceControls.length, cloneControls.length);
+
+            for (let i = 0; i < count; i++) {
+                const source = sourceControls[i];
+                const clone = cloneControls[i];
+
+                if (source instanceof HTMLInputElement && clone instanceof HTMLInputElement) {
+                    clone.value = source.value;
+                    clone.checked = source.checked;
+                    if (source.type === 'checkbox' || source.type === 'radio') {
+                        clone.toggleAttribute('checked', source.checked);
+                    } else {
+                        clone.setAttribute('value', source.value);
+                    }
+                    continue;
+                }
+
+                if (source instanceof HTMLTextAreaElement && clone instanceof HTMLTextAreaElement) {
+                    clone.value = source.value;
+                    clone.textContent = source.value;
+                    continue;
+                }
+
+                if (source instanceof HTMLSelectElement && clone instanceof HTMLSelectElement) {
+                    clone.value = source.value;
+                    Array.from(clone.options).forEach(option => {
+                        option.selected = option.value === source.value;
+                    });
+                }
+            }
+        }
+
+        function buildPdfRenderNode(step) {
+            const printableArea = document.getElementById('printable-area');
+            const activeSection = Array.from(printableArea.querySelectorAll(`section[data-step-id="${step.id}"]`))
+                .find(section => window.getComputedStyle(section).display !== 'none')
+                || printableArea.querySelector(`section[data-step-id="${step.id}"]`);
+
+            if (!activeSection) {
+                throw new Error(`Unable to find section for ${step.title}.`);
+            }
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'pdf-export-shell';
+
+            const header = document.createElement('div');
+            header.className = 'pdf-export-header';
+            header.innerHTML = `
+                <img src="logo.png" alt="Smile You're Golden Logo" class="practice-logo">
+                <div class="practice-info">
+                    <p><strong>Smile You're Golden Dental</strong></p>
+                    <p>200 Chicago Ave, Oak Park, IL 60302</p>
+                </div>
+                <h1>${step.title}</h1>
+                <p>${step.subtitle || ''}</p>
+            `;
+
+            const content = document.createElement('div');
+            content.className = 'pdf-export-content';
+            const sectionClone = activeSection.cloneNode(true);
+            sectionClone.classList.remove('fade-in');
+            sectionClone.style.display = 'block';
+            sectionClone.hidden = false;
+            sectionClone.querySelectorAll('.no-print').forEach(node => node.remove());
+            syncClonedFormState(activeSection, sectionClone);
+            sectionClone.querySelectorAll('canvas').forEach(canvas => {
+                const image = document.createElement('img');
+                try {
+                    image.src = canvas.toDataURL('image/png');
+                    image.className = 'pdf-signature-image';
+                    image.alt = 'Signature';
+                    image.style.width = '100%';
+                    image.style.height = 'auto';
+                    image.style.display = 'block';
+                    image.style.background = '#fff';
+                    image.style.border = '1px solid #ddd';
+                    image.style.borderRadius = '12px';
+                    canvas.replaceWith(image);
+                } catch (error) {
+                    console.warn('Unable to serialize signature canvas for PDF export.', error);
+                }
+            });
+            content.appendChild(sectionClone);
+
+            wrapper.appendChild(header);
+            wrapper.appendChild(content);
+            document.body.appendChild(wrapper);
+            return wrapper;
+        }
+
         async function renderPdfs(stepIds = null) {
-            const element = document.getElementById('printable-area');
             const originalStep = currentStep.value;
             const pdfs = [];
             document.body.classList.add('generating-pdf');
@@ -377,13 +566,17 @@ createApp({
                     initCurrentStepArtifacts();
                     await new Promise(resolve => setTimeout(resolve, 400));
 
+                    const renderNode = buildPdfRenderNode(step);
+
                     const base64 = await html2pdf().set({
-                        margin: [0.3, 0.3],
+                        margin: [0.2, 0.2],
                         filename: `Intake_${simpleFullName().replace(/\s+/g, '_') || 'Patient'}_${step.id}.pdf`,
                         image: { type: 'jpeg', quality: 0.98 },
                         html2canvas: { scale: 2, useCORS: true },
                         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-                    }).from(element).outputPdf('datauristring');
+                    }).from(renderNode).outputPdf('datauristring');
+
+                    renderNode.remove();
 
                     let docType = 4;
                     if (['consent', 'cancellation', 'hipaa', 'signature'].includes(step.id)) {
@@ -424,7 +617,20 @@ createApp({
                 };
 
                 if (isReturningMode.value) {
-                    payload.chartNumber = selectedPatient.value?.chartNumber || '';
+                    let resolvedChartNumber = (selectedChartNumber.value || selectedPatient.value?.chartNumber || payload.chartNumber || '').trim();
+                    if (!resolvedChartNumber && form.value.firstName?.trim() && form.value.lastName?.trim() && form.value.birthDate?.trim()) {
+                        const matches = await SYGApi.searchPatients({
+                            firstName: form.value.firstName,
+                            lastName: form.value.lastName,
+                            birthDate: form.value.birthDate
+                        });
+                        if (Array.isArray(matches) && matches.length === 1 && matches[0]?.chartNumber) {
+                            resolvedChartNumber = `${matches[0].chartNumber}`.trim();
+                            selectedChartNumber.value = resolvedChartNumber;
+                            selectedPatient.value = matches[0];
+                        }
+                    }
+                    payload.chartNumber = resolvedChartNumber;
                     await SYGApi.saveCheckIn(payload);
                 } else {
                     await SYGApi.createIntake(payload);
@@ -484,7 +690,8 @@ createApp({
 
         async function chooseReturningPatient(match) {
             selectedPatient.value = match;
-            selectedStepIds.value = configuredSteps.map(step => step.id);
+            selectedChartNumber.value = `${match?.chartNumber || ''}`.trim();
+            selectedStepIds.value = [];
             await withoutDirtyTracking(async () => {
                 form.value = SYGModels.applyPatientToForm(match);
                 autoNameSeed = simpleFullName();
@@ -559,7 +766,7 @@ createApp({
         });
 
         onMounted(async () => {
-            selectedStepIds.value = configuredSteps.map(step => step.id);
+            selectedStepIds.value = [];
             await nextTick();
             initDatePickers();
         });
@@ -592,6 +799,7 @@ createApp({
             successMessage,
             successButtonLabel,
             patientDisplayName,
+            getPatientDisplayLabel,
             showAutofill,
             nextStep,
             prevStep,
