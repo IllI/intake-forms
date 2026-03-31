@@ -550,6 +550,7 @@ createApp({
         }
 
         async function renderPdfs(stepIds = null) {
+            const element = document.getElementById('printable-area');
             const originalStep = currentStep.value;
             const pdfs = [];
             document.body.classList.add('generating-pdf');
@@ -566,17 +567,15 @@ createApp({
                     initCurrentStepArtifacts();
                     await new Promise(resolve => setTimeout(resolve, 400));
 
-                    const renderNode = buildPdfRenderNode(step);
-
                     const base64 = await html2pdf().set({
-                        margin: [0.2, 0.2],
+                        margin: [0.3, 0.3],
                         filename: `Intake_${simpleFullName().replace(/\s+/g, '_') || 'Patient'}_${step.id}.pdf`,
                         image: { type: 'jpeg', quality: 0.98 },
                         html2canvas: { scale: 2, useCORS: true },
                         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-                    }).from(renderNode).outputPdf('datauristring');
+                    }).from(element).outputPdf('datauristring');
 
-                    renderNode.remove();
+
 
                     let docType = 4;
                     if (['consent', 'cancellation', 'hipaa', 'signature'].includes(step.id)) {
