@@ -151,8 +151,11 @@ createApp({
 
             element.addEventListener('input', applyDateMask);
             element.addEventListener('blur', () => {
-                const parsed = parseStrictDate(element.value);
-                element.value = parsed ? formatDateValue(parsed) : maskDateValue(element.value);
+                const selectedDate = element._flatpickr?.selectedDates?.[0];
+                const parsed = selectedDate || parseStrictDate(element.value);
+                const nextValue = parsed ? formatDateValue(parsed) : maskDateValue(element.value);
+                element.value = nextValue;
+                syncDateModel(element, nextValue);
                 if (element._flatpickr) {
                     if (parsed) {
                         element._flatpickr.setDate(parsed, false);
@@ -193,6 +196,72 @@ createApp({
 
         function cloneFormState(source) {
             return JSON.parse(JSON.stringify(source));
+        }
+
+        function setByPath(target, path, value) {
+            const segments = path.split('.');
+            const lastSegment = segments.pop();
+            let cursor = target;
+
+            for (const segment of segments) {
+                if (!cursor || typeof cursor !== 'object') {
+                    return;
+                }
+                cursor = cursor[segment];
+            }
+
+            if (cursor && typeof cursor === 'object' && lastSegment) {
+                cursor[lastSegment] = value;
+            }
+        }
+
+        function syncDateModel(element, value) {
+            const modelPath = element?.getAttribute('v-model');
+            if (!modelPath) return;
+
+            if (modelPath.startsWith('form.')) {
+                setByPath(form.value, modelPath.slice(5), value);
+                return;
+            }
+
+            if (modelPath.startsWith('lookupForm.')) {
+                setByPath(lookupForm.value, modelPath.slice(11), value);
+            }
+        }
+
+        function commitPickerDate(instance, date) {
+            if (!instance || !(date instanceof Date) || Number.isNaN(date.getTime())) {
+                return;
+            }
+
+            const formatted = formatDateValue(date);
+            instance.setDate(date, false);
+            instance.input.value = formatted;
+            syncDateModel(instance.input, formatted);
+            setTimeout(() => instance.close(), 0);
+        }
+
+        function bindSingleTapDateSelection(instance) {
+            const container = instance?.calendarContainer;
+            if (!container || container.dataset.singleTapBound === 'true') {
+                return;
+            }
+
+            container.dataset.singleTapBound = 'true';
+            container.addEventListener('pointerdown', (event) => {
+                const day = event.target?.closest?.('.flatpickr-day');
+                if (!day || day.classList.contains('disabled') || day.classList.contains('prevMonthDay') || day.classList.contains('nextMonthDay')) {
+                    return;
+                }
+
+                if (!(day.dateObj instanceof Date) || Number.isNaN(day.dateObj.getTime())) {
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                commitPickerDate(instance, day.dateObj);
+            }, true);
         }
 
         function getEditedStepIds() {
@@ -253,11 +322,29 @@ createApp({
 
             const pickerOptions = {
                 dateFormat: 'm/d/Y',
+                disableMobile: true,
                 allowInput: true,
                 parseDate: (datestr) => parseStrictDate(datestr),
                 formatDate: (date) => formatDateValue(date),
+                onReady: (_, __, instance) => {
+                    bindSingleTapDateSelection(instance);
+                },
+                onChange: (selectedDates, dateStr, instance) => {
+                    const selectedDate = selectedDates?.[0];
+                    if (selectedDate) {
+                        commitPickerDate(instance, selectedDate);
+                        return;
+                    }
+
+                    const formatted = maskDateValue(dateStr);
+                    instance.input.value = formatted;
+                    syncDateModel(instance.input, formatted);
+                },
                 onValueUpdate: (_, dateStr, instance) => {
-                    instance.input.value = maskDateValue(dateStr);
+                    if (!dateStr) return;
+                    const formatted = maskDateValue(dateStr);
+                    instance.input.value = formatted;
+                    syncDateModel(instance.input, formatted);
                 }
             };
 
