@@ -386,9 +386,16 @@ function Resolve-OdbcType($type) {
     }
 }
 
-function Add-UpdateParameter($cmd, [string]$columnName, $value, $type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0) {
+function Add-UpdateParameter($cmd, [string]$columnName, $value, $type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0, [switch]$inline) {
+    $resolvedType = Resolve-OdbcType $type
+    # DBISAM rejects ? placeholders for integer columns in UPDATE statements.
+    # Inline the integer value directly into the SQL fragment instead.
+    if ($inline -or $resolvedType -eq [System.Data.Odbc.OdbcType]::Int -or $resolvedType -eq [System.Data.Odbc.OdbcType]::SmallInt) {
+        $intVal = if ($null -eq $value -or $value -is [System.DBNull]) { 'NULL' } else { [int]$value }
+        return '"{0}" = {1}' -f $columnName, $intVal
+    }
     $parameter = $cmd.CreateParameter()
-    $parameter.OdbcType = Resolve-OdbcType $type
+    $parameter.OdbcType = $resolvedType
     if ($size -gt 0) { $parameter.Size = $size }
     $parameter.Value = To-DbNull $value
     [void]$cmd.Parameters.Add($parameter)
@@ -699,7 +706,8 @@ function Handle-ApiCheckIn($request, $response) {
 
             $relationColumn = Get-ExistingColumnName $patientColumns @('Relation to Subscriber 1')
             if ($relationColumn) {
-                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $relationColumn -value (Convert-TextToRelationCode $payload.relationship) -type ([System.Data.Odbc.OdbcType]::Int)))
+                # Hardcode 0 = Self; DBISAM requires integer values inlined in UPDATE SQL (no ? for int columns)
+                [void]$assignments.Add('"Relation to Subscriber 1" = 0')
                 $updatedColumns += $relationColumn
             }
 
