@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
 
     <!-- Styles -->
-    <link rel="stylesheet" href="style.css?v=20260331c">
+    <link rel="stylesheet" href="style.css?v=20260507c">
 
     <!-- Dependencies -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -879,7 +879,7 @@
         </div>
 
         <!-- Success Overlay or Saving UI -->
-        <div class="overlay" v-if="showSuccess">
+        <div class="overlay no-print" v-if="showSuccess">
             <div class="overlay-content fade-in">
                 <div class="checkmark-animation">✓</div>
                 <h2>{{ successTitle }}</h2>
@@ -889,7 +889,7 @@
             </div>
         </div>
 
-        <div class="overlay" v-if="isSubmitting && !showSuccess">
+        <div class="overlay no-print" v-if="isSubmitting && !showSuccess">
             <div class="overlay-content fade-in">
                 <div class="loader"
                     style="width: 50px; height: 50px; border-width: 4px; border-top-color: var(--primary);"></div>
@@ -900,9 +900,9 @@
         </div>
     </div>
 
-    <script src="models.js?v=20260331e"></script>
-    <script src="api.js?v=20260331e"></script>
-    <script src="app.js?v=20260331e"></script>
+    <script src="models.js?v=20260507c"></script>
+    <script src="api.js?v=20260507c"></script>
+    <script src="app.js?v=20260507c"></script>
 </body>
 
 </html>

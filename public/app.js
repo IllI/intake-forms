@@ -265,10 +265,11 @@ createApp({
         }
 
         function getEditedStepIds() {
+            // New patients: always save every configured step
             if (!isReturningMode.value) {
                 return steps.value.map(step => step.id);
             }
-
+            // Returning patients: only save steps that were actually changed
             const dirty = SYGModels.getDirtyStepIds(form.value, initialFormSnapshot.value, {
                 signatures: signatureDirty.value
             });
@@ -652,28 +653,44 @@ createApp({
                     currentStep.value = stepIndex + 1;
                     await nextTick();
                     initCurrentStepArtifacts();
-                    await new Promise(resolve => setTimeout(resolve, 400));
+                    await new Promise(resolve => setTimeout(resolve, 600));
 
-                    const base64 = await html2pdf().set({
-                        margin: [0.3, 0.3],
-                        filename: `Intake_${simpleFullName().replace(/\s+/g, '_') || 'Patient'}_${step.id}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 2, useCORS: true },
-                        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-                    }).from(element).outputPdf('datauristring');
+                    // Hide every section except the active one so html2pdf
+                    // does not produce blank pages for the hidden sections.
+                    const allSections = element.querySelectorAll('section[data-step-id]');
+                    const hiddenSections = [];
+                    allSections.forEach(sec => {
+                        if (sec.dataset.stepId !== step.id && sec.style.display !== 'none') {
+                            sec.style.display = 'none';
+                            hiddenSections.push(sec);
+                        }
+                    });
 
+                    try {
+                        const base64 = await html2pdf().set({
+                            margin: [0.3, 0.3],
+                            filename: `Intake_${simpleFullName().replace(/\s+/g, '_') || 'Patient'}_${step.id}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true,
+                                ignoreElements: (el) => el && el.classList && el.classList.contains('no-print')
+                            },
+                            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                        }).from(element).outputPdf('datauristring');
 
+                        let docType = 4;
+                        if (['consent', 'cancellation', 'hipaa', 'signature'].includes(step.id)) {
+                            docType = 3;
+                        }
 
-                    let docType = 4;
-                    if (['consent', 'cancellation', 'hipaa', 'signature'].includes(step.id)) {
-                        docType = 3;
+                        let title = `${step.title} Form`;
+                        if (step.id === 'consent') title = 'Dental Consent Form';
+                        if (step.id === 'hipaa') title = 'HIPAA Acknowledgment';
+
+                        pdfs.push({ title, docType, base64 });
+                    } finally {
+                        // Restore sections that were temporarily hidden
+                        hiddenSections.forEach(sec => { sec.style.display = ''; });
                     }
-
-                    let title = `${step.title} Form`;
-                    if (step.id === 'consent') title = 'Dental Consent Form';
-                    if (step.id === 'hipaa') title = 'HIPAA Acknowledgment';
-
-                    pdfs.push({ title, docType, base64 });
                 }
             } finally {
                 currentStep.value = originalStep;
@@ -692,8 +709,10 @@ createApp({
 
             isSubmitting.value = true;
             try {
+                // Render PDFs AFTER setting isSubmitting so the overlay 
+                // covers the form cycling, but html2canvas ignores it via no-print.
                 const editedStepIds = getEditedStepIds();
-                const pdfs = await renderPdfs(isReturningMode.value ? editedStepIds : null);
+                const pdfs = await renderPdfs(editedStepIds);
                 const payload = {
                     ...form.value,
                     flowType: currentMode.value,

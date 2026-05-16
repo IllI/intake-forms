@@ -364,9 +364,31 @@ function Find-NormalizedPatientMatches($rows, [string]$firstName, [string]$lastN
     )
 }
 
-function Add-UpdateParameter($cmd, [string]$columnName, $value, [System.Data.Odbc.OdbcType]$type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0) {
+function Resolve-OdbcType($type) {
+    if ($null -eq $type) {
+        return [System.Data.Odbc.OdbcType]::VarChar
+    }
+
+    if ($type -is [System.Data.Odbc.OdbcType]) {
+        return $type
+    }
+
+    $text = "$type".Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return [System.Data.Odbc.OdbcType]::VarChar
+    }
+
+    $text = $text -replace '^\[?System\.Data\.Odbc\.OdbcType\]?::', ''
+    try {
+        return [System.Enum]::Parse([System.Data.Odbc.OdbcType], $text, $true)
+    } catch {
+        throw "Unsupported OdbcType value '$type'."
+    }
+}
+
+function Add-UpdateParameter($cmd, [string]$columnName, $value, $type = [System.Data.Odbc.OdbcType]::VarChar, [int]$size = 0) {
     $parameter = $cmd.CreateParameter()
-    $parameter.OdbcType = $type
+    $parameter.OdbcType = Resolve-OdbcType $type
     if ($size -gt 0) { $parameter.Size = $size }
     $parameter.Value = To-DbNull $value
     [void]$cmd.Parameters.Add($parameter)
@@ -659,31 +681,31 @@ function Handle-ApiCheckIn($request, $response) {
                 $columnName = Get-ExistingColumnName $patientColumns $field.candidates
                 if ($null -eq $columnName) { continue }
                 $type = if ($field.ContainsKey('type')) { $field.type } else { [System.Data.Odbc.OdbcType]::VarChar }
-                [void]$assignments.Add((Add-UpdateParameter $updateCmd $columnName $field.value $type))
+                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $columnName -value $field.value -type $type))
                 $updatedColumns += $columnName
             }
 
             $headOfHouseholdColumn = Get-ExistingColumnName $patientColumns @('Head of Household')
             if ($headOfHouseholdColumn) {
-                [void]$assignments.Add((Add-UpdateParameter $updateCmd $headOfHouseholdColumn $chartNumber [System.Data.Odbc.OdbcType]::Char 10))
+                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $headOfHouseholdColumn -value $chartNumber -type ([System.Data.Odbc.OdbcType]::Char) -size 10))
                 $updatedColumns += $headOfHouseholdColumn
             }
 
             $subscriberColumn = Get-ExistingColumnName $patientColumns @('Subscriber 1')
             if ($subscriberColumn) {
-                [void]$assignments.Add((Add-UpdateParameter $updateCmd $subscriberColumn $chartNumber [System.Data.Odbc.OdbcType]::Char 10))
+                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $subscriberColumn -value $chartNumber -type ([System.Data.Odbc.OdbcType]::Char) -size 10))
                 $updatedColumns += $subscriberColumn
             }
 
             $relationColumn = Get-ExistingColumnName $patientColumns @('Relation to Subscriber 1')
             if ($relationColumn) {
-                [void]$assignments.Add((Add-UpdateParameter $updateCmd $relationColumn (Convert-TextToRelationCode $payload.relationship) [System.Data.Odbc.OdbcType]::Int))
+                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $relationColumn -value (Convert-TextToRelationCode $payload.relationship) -type ([System.Data.Odbc.OdbcType]::Int)))
                 $updatedColumns += $relationColumn
             }
 
             $modifiedColumn = Get-ExistingColumnName $patientColumns @('Date Modified')
             if ($modifiedColumn) {
-                [void]$assignments.Add((Add-UpdateParameter $updateCmd $modifiedColumn ([datetime]::Now) [System.Data.Odbc.OdbcType]::DateTime))
+                [void]$assignments.Add((Add-UpdateParameter -cmd $updateCmd -columnName $modifiedColumn -value ([datetime]::Now) -type ([System.Data.Odbc.OdbcType]::DateTime)))
                 $updatedColumns += $modifiedColumn
             }
 
